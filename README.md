@@ -1,6 +1,10 @@
-# EVIDO
+# EVIDO (TraceWork)
+
+![Typing SVG](https://readme-typing-svg.demolab.com?font=Fira+Code&size=20&pause=1000&color=8B5CF6&center=true&vCenter=true&width=600&lines=EVIDO%20%E2%80%94%20Workforce%20%26%20Operations%20Management;Next.js%20%2B%20Prisma%20%2B%20PostgreSQL%20%2B%20NextAuth;%D0%90%D0%B6%D0%B8%D0%BB%20%D0%B1%D2%AF%D1%80%20%D0%B1%D0%B0%D1%82%D0%B0%D0%BB%D0%B3%D0%B0%D0%B0%D1%82%D0%B0%D0%B9)
 
 Нотолгоонд суурилсан ажил, төсөл, гүйцэтгэлийн удирдлагын платформ. Гол зарчим: **Ажил бүр баталгаатай.**
+
+GitHub: [bbek3201/TraceWork](https://github.com/bbek3201/TraceWork)
 
 Next.js (App Router) + Prisma + PostgreSQL (Neon) + NextAuth дээр бүтээгдсэн, олон байгууллага (multi-tenant), монгол хэл дээрх ажлын урсгал, гүйцэтгэлийн удирдлагын систем.
 
