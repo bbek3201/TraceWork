@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EVIDO
 
-## Getting Started
+Нотолгоонд суурилсан ажил, төсөл, гүйцэтгэлийн удирдлагын платформ. Гол зарчим: **Ажил бүр баталгаатай.**
 
-First, run the development server:
+Next.js (App Router) + Prisma + PostgreSQL (Neon) + NextAuth дээр бүтээгдсэн, олон байгууллага (multi-tenant), монгол хэл дээрх ажлын урсгал, гүйцэтгэлийн удирдлагын систем.
+
+## Түргэн эхлэл
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+bun install
+cp .env.example .env   # DATABASE_URL, NEXTAUTH_SECRET-ээ тохируулна
+bun run db:migrate
+bun run db:seed        # жишээ байгууллага, ажилтан, төсөл, ажлын дата үүсгэнэ
+bun run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`http://localhost:3000` дээр нээгдэнэ. Жишээ нэвтрэх мэдээлэл: `employee1@evido.mn` / `Password123!` (ADMIN эрхтэй). Шинэ байгууллага `/register` дээрээс өөрөө бүртгүүлж болно.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Боломжууд
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Байгууллага, гишүүнчлэл** — олон байгууллагад харьяалагдах боломжтой хэрэглэгч, нэвтрэхдээ байгууллага сонгох, урих/гишүүн нэмэх
+- **Эрх удирдлага (RBAC)** — 6 үндсэн role (Ажилтан/Багийн ахлагч/Менежер/HR/Гүйцэтгэх удирдлага/Админ), permission-based хандалт
+- **Төсөл, ажил** — ажлын төлөв шилжилтийн машин (state machine), эрсдэлийн түвшин, хамаарал (dependency), хойшлуулах/хориглох шалтгаан, шилжүүлэг (handover)
+- **Ажлын загвар (template)** — давтагдах ажлын чеклист, нотолгооны шаардлагыг урьдчилан бэлдэх
+- **Олон шатны баталгаажуулалт** — эрсдэлийн түвшнээс хамаарсан 1–3 шатны review/approval урсгал, чанарын үнэлгээ
+- **Гүйцэтгэлийн оноо** — үндсэн оноо × хугацаа × чанар × нотолгооны коэффициент дээр суурилсан автомат тооцоолол
+- **Нотолгоо** — файл хавсаргах, зурган/бичиг баримтын нотолгоо шаардлага, аутентификацитай татах route
+- **Ирц, чөлөө** — өдөр тутмын ирц бүртгэл, чөлөөний хүсэлт/зөвшөөрөл
+- **Агуулах** — бараа материал, захиалга (PO), хүлээн авалт, тооллого, 3 талт тулгалт, зөрүү (mismatch) удирдлага
+- **Мэдэгдэл, аудит** — систем дотоод мэдэгдэл, бүх мутаци үйлдлийн audit log
+- **Тайлан** — байгууллагын гүйцэтгэл, ирц, агуулахын нэгдсэн үзүүлэлт
+- **Профайл** — өөрийн мэдээлэл харах, нэр/нууц үг солих
 
-## Learn More
+## Технологи
 
-To learn more about Next.js, take a look at the following resources:
+Next.js · React · TypeScript · Prisma · PostgreSQL (Neon) · NextAuth (Credentials + JWT) · Zod · Tailwind CSS
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Скриптүүд
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+bun run dev          # хөгжүүлэлтийн server
+bun run build         # production build
+bun run lint          # ESLint
+bun run db:migrate    # Prisma migration
+bun run db:seed       # жишээ дата
+```
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Дэлгэрэнгүй архитектур, ERD, permission матриц, ажлын урсгалын дүрмийг [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)-с үзнэ үү.

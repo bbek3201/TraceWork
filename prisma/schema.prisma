@@ -1,0 +1,689 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MemberStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+enum ProjectStatus {
+  DRAFT
+  ACTIVE
+  ON_HOLD
+  AT_RISK
+  COMPLETED
+  CANCELLED
+}
+enum TaskStatus {
+  DRAFT
+  ASSIGNED
+  IN_PROGRESS
+  BLOCKED
+  WAITING
+  SUBMITTED
+  UNDER_REVIEW
+  CHANGES_REQUIRED
+  APPROVED
+  REJECTED
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+enum TaskBlockReason {
+  MISSING_DOCUMENT
+  WAITING_APPROVAL
+  WAITING_SUPPLIER
+  WAITING_CUSTOMER
+  WAITING_PAYMENT
+  MISSING_MATERIAL
+  TECHNICAL_ISSUE
+  SYSTEM_ISSUE
+  PREVIOUS_TASK_INCOMPLETE
+  OTHER
+}
+enum TaskRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+enum EvidenceType {
+  PHOTO
+  BEFORE_AFTER
+  VIDEO
+  PDF
+  WORD
+  EXCEL
+  DOCUMENT
+  BARCODE
+  QR
+  CHECKLIST
+  QUANTITY
+  GPS
+  DIGITAL_SIGNATURE
+  CUSTOMER_SIGNATURE
+  NOTE
+  URL
+}
+enum ReviewDecision {
+  APPROVED
+  CHANGES_REQUIRED
+  REJECTED
+}
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  timezone    String   @default("Asia/Ulaanbaatar")
+  language    String   @default("mn")
+  branches    Branch[]
+  departments Department[]
+  members     OrganizationMember[]
+  roles       Role[]
+  projects    Project[]
+  tasks       Task[]
+  auditLogs   AuditLog[]
+  attendances   Attendance[]
+  leaveRequests LeaveRequest[]
+  products      Product[]
+  notifications Notification[]
+  purchaseOrders PurchaseOrder[]
+  inventoryReceipts InventoryReceipt[]
+  inventoryCounts InventoryCount[]
+  inventoryMismatches InventoryMismatch[]
+  taskTemplates TaskTemplate[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+}
+
+model Branch {
+  id String @id @default(cuid())
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id])
+  name String
+  address String?
+  members OrganizationMember[]
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Department {
+  id String @id @default(cuid())
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id])
+  name String
+  members OrganizationMember[]
+  projects Project[]
+  @@unique([organizationId, name])
+}
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String?
+  name String
+  image String?
+  memberships OrganizationMember[]
+  createdTasks Task[] @relation("TaskCreator")
+  evidence TaskEvidence[]
+  reviews TaskReview[]
+  auditLogs AuditLog[]
+  approvedLeaveRequests LeaveRequest[] @relation("LeaveApprover")
+  stockMovements StockMovement[]
+  notifications Notification[]
+  createdHandovers TaskHandover[]
+  createdPurchaseOrders PurchaseOrder[]
+  receivedInventoryReceipts InventoryReceipt[]
+  createdInventoryCounts InventoryCount[]
+  resolvedMismatches InventoryMismatch[]
+  createdTaskTemplates TaskTemplate[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OrganizationMember {
+  id String @id @default(cuid())
+  organizationId String
+  userId String
+  branchId String?
+  departmentId String?
+  status MemberStatus @default(INVITED)
+  jobTitle String?
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+  branch Branch? @relation(fields: [branchId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+  roles UserRole[]
+  projectMemberships ProjectMember[]
+  assignments TaskAssignee[]
+  attendances Attendance[]
+  leaveRequests LeaveRequest[]
+  handoversFrom TaskHandover[] @relation("HandoverFrom")
+  handoversTo TaskHandover[] @relation("HandoverTo")
+  @@unique([organizationId, userId])
+  @@index([organizationId, departmentId])
+}
+
+model Role {
+  id String @id @default(cuid())
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id])
+  name String
+  users UserRole[]
+  permissions RolePermission[]
+  @@unique([organizationId, name])
+}
+
+model Permission {
+  id String @id @default(cuid())
+  key String @unique
+  description String?
+  roles RolePermission[]
+}
+
+model UserRole {
+  memberId String
+  roleId String
+  member OrganizationMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@id([memberId, roleId])
+}
+
+model RolePermission {
+  roleId String
+  permissionId String
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  @@id([roleId, permissionId])
+}
+
+model Project {
+  id String @id @default(cuid())
+  organizationId String
+  departmentId String?
+  name String
+  description String?
+  status ProjectStatus @default(DRAFT)
+  progress Int @default(0)
+  startDate DateTime?
+  dueDate DateTime?
+  organization Organization @relation(fields: [organizationId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+  members ProjectMember[]
+  tasks Task[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  @@index([organizationId, status])
+}
+
+model ProjectMember {
+  projectId String
+  memberId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  member OrganizationMember @relation(fields: [memberId], references: [id])
+  @@id([projectId, memberId])
+}
+
+model TaskTemplate {
+  id               String   @id @default(cuid())
+  organizationId   String
+  name             String
+  description      String?
+  priority         Int      @default(2)
+  difficulty       Int      @default(1)
+  basePoints       Decimal  @default(0)
+  riskLevel        TaskRiskLevel @default(LOW)
+  checklistItems   Json?
+  requirementItems Json?
+  createdById      String
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  createdBy        User @relation(fields: [createdById], references: [id])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  @@unique([organizationId, name])
+}
+
+model Task {
+  id String @id @default(cuid())
+  organizationId String
+  projectId String?
+  title String
+  description String?
+  status TaskStatus @default(DRAFT)
+  blockedReason TaskBlockReason?
+  blockedNote String?
+  riskLevel TaskRiskLevel @default(LOW)
+  priority Int @default(2)
+  difficulty Int @default(1)
+  basePoints Decimal @default(0)
+  progress Int @default(0)
+  dueAt DateTime?
+  createdById String
+  organization Organization @relation(fields: [organizationId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id])
+  createdBy User @relation("TaskCreator", fields: [createdById], references: [id])
+  assignees TaskAssignee[]
+  checklist TaskChecklist[]
+  requirements EvidenceRequirement[]
+  evidence TaskEvidence[]
+  submissions TaskSubmission[]
+  dependencies TaskDependency[] @relation("TaskDependencies")
+  dependents TaskDependency[] @relation("TaskDependents")
+  handovers TaskHandover[]
+  score TaskScore?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  @@index([organizationId, status, dueAt])
+  @@index([projectId])
+}
+
+enum TaskDependencyType {
+  FINISH_TO_START
+  START_TO_START
+  FINISH_TO_FINISH
+}
+
+model TaskDependency {
+  id String @id @default(cuid())
+  taskId String
+  dependsOnTaskId String
+  dependencyType TaskDependencyType @default(FINISH_TO_START)
+  task Task @relation("TaskDependencies", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn Task @relation("TaskDependents", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([taskId, dependsOnTaskId])
+  @@index([taskId])
+  @@index([dependsOnTaskId])
+}
+
+model TaskAssignee {
+  taskId String
+  memberId String
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  member OrganizationMember @relation(fields: [memberId], references: [id])
+  @@id([taskId, memberId])
+}
+
+model TaskChecklist {
+  id String @id @default(cuid())
+  taskId String
+  title String
+  isRequired Boolean @default(true)
+  completedAt DateTime?
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  @@index([taskId])
+}
+
+model EvidenceRequirement {
+  id String @id @default(cuid())
+  taskId String
+  type EvidenceType
+  title String
+  required Boolean @default(true)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  evidence TaskEvidence[]
+  @@index([taskId])
+}
+
+model FileAsset {
+  id String @id @default(cuid())
+  storageKey String @unique
+  fileName String
+  mimeType String
+  size Int
+  hash String?
+  evidence TaskEvidence[]
+  createdAt DateTime @default(now())
+}
+
+model TaskEvidence {
+  id String @id @default(cuid())
+  taskId String
+  requirementId String
+  fileAssetId String?
+  uploadedById String
+  version Int @default(1)
+  note String?
+  metadata Json?
+  task Task @relation(fields: [taskId], references: [id])
+  requirement EvidenceRequirement @relation(fields: [requirementId], references: [id])
+  fileAsset FileAsset? @relation(fields: [fileAssetId], references: [id])
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+  createdAt DateTime @default(now())
+  @@unique([requirementId, version])
+  @@index([taskId])
+}
+
+model TaskSubmission {
+  id String @id @default(cuid())
+  taskId String
+  version Int
+  note String?
+  submittedAt DateTime @default(now())
+  task Task @relation(fields: [taskId], references: [id])
+  reviews TaskReview[]
+  @@unique([taskId, version])
+}
+
+model TaskReview {
+  id String @id @default(cuid())
+  submissionId String
+  reviewerId String
+  decision ReviewDecision
+  reason String?
+  qualityScore Int?
+  submission TaskSubmission @relation(fields: [submissionId], references: [id])
+  reviewer User @relation(fields: [reviewerId], references: [id])
+  createdAt DateTime @default(now())
+  @@index([submissionId, createdAt])
+}
+
+model TaskScore {
+  id String @id @default(cuid())
+  taskId String @unique
+  basePoint Decimal
+  deadlineCoefficient Decimal
+  qualityCoefficient Decimal
+  evidenceCoefficient Decimal
+  finalScore Decimal
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+  organizationId String
+  actorId String?
+  action String
+  entityType String
+  entityId String
+  previousValue Json?
+  newValue Json?
+  ipAddress String?
+  device String?
+  organization Organization @relation(fields: [organizationId], references: [id])
+  actor User? @relation(fields: [actorId], references: [id])
+  createdAt DateTime @default(now())
+  @@index([organizationId, entityType, entityId])
+  @@index([organizationId, createdAt])
+}
+
+model Notification {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  type           String
+  title          String
+  body           String?
+  entityType     String?
+  entityId       String?
+  readAt         DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User @relation(fields: [userId], references: [id])
+  createdAt      DateTime @default(now())
+  @@index([organizationId, userId, readAt])
+  @@index([userId, createdAt])
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  REMOTE
+  FIELD_WORK
+  BUSINESS_TRIP
+  HALF_DAY
+}
+enum LeaveType {
+  ANNUAL
+  SICK
+  UNPAID
+  OTHER
+}
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+enum StockMovementType {
+  RECEIPT
+  ISSUE
+  ADJUSTMENT
+}
+
+model Attendance {
+  id             String   @id @default(cuid())
+  organizationId String
+  memberId       String
+  workDate       DateTime @db.Date
+  checkInAt      DateTime?
+  checkOutAt     DateTime?
+  breakMinutes   Int      @default(0)
+  status         AttendanceStatus @default(PRESENT)
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  member         OrganizationMember @relation(fields: [memberId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@unique([memberId, workDate])
+  @@index([organizationId, workDate])
+}
+
+model LeaveRequest {
+  id             String   @id @default(cuid())
+  organizationId String
+  memberId       String
+  leaveType      LeaveType
+  startDate      DateTime @db.Date
+  endDate        DateTime @db.Date
+  reason         String?
+  status         LeaveStatus @default(PENDING)
+  approvedById   String?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  member         OrganizationMember @relation(fields: [memberId], references: [id])
+  approvedBy     User? @relation("LeaveApprover", fields: [approvedById], references: [id])
+  handovers      TaskHandover[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([organizationId, status])
+}
+
+enum HandoverTransferType {
+  TEMPORARY
+  PERMANENT
+}
+
+model TaskHandover {
+  id             String   @id @default(cuid())
+  taskId         String
+  leaveRequestId String?
+  fromMemberId   String
+  toMemberId     String
+  transferType   HandoverTransferType @default(TEMPORARY)
+  note           String?
+  createdById    String
+  task           Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  leaveRequest   LeaveRequest? @relation(fields: [leaveRequestId], references: [id])
+  fromMember     OrganizationMember @relation("HandoverFrom", fields: [fromMemberId], references: [id])
+  toMember       OrganizationMember @relation("HandoverTo", fields: [toMemberId], references: [id])
+  createdBy      User @relation(fields: [createdById], references: [id])
+  createdAt      DateTime @default(now())
+  @@index([taskId])
+  @@index([leaveRequestId])
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  sku            String
+  barcode        String?
+  unit           String   @default("ш")
+  reorderPoint   Int      @default(10)
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  movements      StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+  receiptItems   InventoryReceiptItem[]
+  countItems     InventoryCountItem[]
+  mismatches     InventoryMismatch[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@unique([organizationId, sku])
+  @@index([organizationId])
+}
+
+model StockMovement {
+  id          String   @id @default(cuid())
+  productId   String
+  type        StockMovementType
+  quantity    Int
+  note        String?
+  createdById String
+  product     Product @relation(fields: [productId], references: [id])
+  createdBy   User @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  @@index([productId, createdAt])
+}
+
+enum PurchaseOrderStatus {
+  OPEN
+  RECEIVED
+  CLOSED
+}
+
+model PurchaseOrder {
+  id             String   @id @default(cuid())
+  organizationId String
+  poNumber       String
+  supplierName   String
+  invoiceNumber  String?
+  status         PurchaseOrderStatus @default(OPEN)
+  createdById    String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdBy      User @relation(fields: [createdById], references: [id])
+  items          PurchaseOrderItem[]
+  receipts       InventoryReceipt[]
+  createdAt      DateTime @default(now())
+  @@unique([organizationId, poNumber])
+  @@index([organizationId, status])
+}
+
+model PurchaseOrderItem {
+  id               String  @id @default(cuid())
+  purchaseOrderId  String
+  productId        String
+  expectedQuantity Int
+  invoiceQuantity  Int?
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product          Product @relation(fields: [productId], references: [id])
+  receiptItems     InventoryReceiptItem[]
+  @@unique([purchaseOrderId, productId])
+}
+
+model InventoryReceipt {
+  id              String   @id @default(cuid())
+  organizationId  String
+  purchaseOrderId String
+  receivedById    String
+  note            String?
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  receivedBy      User @relation(fields: [receivedById], references: [id])
+  items           InventoryReceiptItem[]
+  createdAt       DateTime @default(now())
+  @@index([organizationId, purchaseOrderId])
+}
+
+model InventoryReceiptItem {
+  id                  String @id @default(cuid())
+  receiptId           String
+  purchaseOrderItemId String
+  productId           String
+  expectedQuantity    Int
+  receivedQuantity    Int
+  damagedQuantity     Int    @default(0)
+  missingQuantity     Int    @default(0)
+  extraQuantity       Int    @default(0)
+  receipt             InventoryReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
+  product             Product @relation(fields: [productId], references: [id])
+}
+
+enum InventoryCountStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+model InventoryCount {
+  id             String   @id @default(cuid())
+  organizationId String
+  location       String?
+  createdById    String
+  status         InventoryCountStatus @default(COMPLETED)
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdBy      User @relation(fields: [createdById], references: [id])
+  items          InventoryCountItem[]
+  createdAt      DateTime @default(now())
+  @@index([organizationId, createdAt])
+}
+
+model InventoryCountItem {
+  id               String @id @default(cuid())
+  inventoryCountId String
+  productId        String
+  systemQuantity   Int
+  countedQuantity  Int
+  difference       Int
+  inventoryCount   InventoryCount @relation(fields: [inventoryCountId], references: [id], onDelete: Cascade)
+  product          Product @relation(fields: [productId], references: [id])
+}
+
+enum InventoryMismatchType {
+  MISSING
+  DAMAGED
+  WRONG_PRODUCT
+  WRONG_QUANTITY
+  EXPIRED
+  PACKAGING_DAMAGE
+  SERIAL_MISMATCH
+  DUPLICATE
+  OTHER
+}
+enum InventoryMismatchStatus {
+  OPEN
+  RESOLVED
+}
+enum InventoryMismatchSource {
+  RECEIPT
+  COUNT
+  THREE_WAY
+}
+
+model InventoryMismatch {
+  id             String   @id @default(cuid())
+  organizationId String
+  productId      String
+  type           InventoryMismatchType
+  quantity       Int
+  description    String?
+  status         InventoryMismatchStatus @default(OPEN)
+  sourceType     InventoryMismatchSource
+  sourceId       String
+  resolvedById   String?
+  resolvedNote   String?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  product        Product @relation(fields: [productId], references: [id])
+  resolvedBy     User? @relation(fields: [resolvedById], references: [id])
+  createdAt      DateTime @default(now())
+  @@index([organizationId, status])
+}

@@ -1,65 +1,82 @@
-import Image from "next/image";
+import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
+import { authOptions } from "@/lib/auth";
+import {
+  countAtRiskTasks,
+  countUnreadNotifications,
+  getMyFocusTask,
+  getTaskMetrics,
+  getTodayAttendance,
+  listRecentNotifications,
+  listReviewQueue,
+  listTeamWorkload,
+  listTopProjects,
+} from "@/lib/queries";
+import { projectStatusLabel, taskStatusLabel } from "@/lib/labels";
+import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
+import { Dashboard } from "@/components/dashboard";
 
-export default function Home() {
+function formatTime(date: Date | null | undefined) {
+  if (!date) return null;
+  return date.toLocaleTimeString("mn-MN", { hour: "2-digit", minute: "2-digit" });
+}
+
+export default async function Home() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) redirect("/login");
+  const organizationId = session.user.organizationId;
+  const canViewTeam = can(session.user.role as AppRole, PERMISSIONS.reportsRead);
+
+  const [notifications, unreadCount, taskMetrics, focusTaskRow, topProjectRows, reviewQueueRows, workloadRows, atRiskCount, attendance] =
+    await Promise.all([
+      listRecentNotifications(organizationId, session.user.id),
+      countUnreadNotifications(organizationId, session.user.id),
+      getTaskMetrics(organizationId),
+      getMyFocusTask(organizationId, session.user.memberId),
+      listTopProjects(organizationId, 3),
+      can(session.user.role as AppRole, PERMISSIONS.taskReview) ? listReviewQueue(organizationId, 4) : Promise.resolve([]),
+      canViewTeam ? listTeamWorkload(organizationId, 5) : Promise.resolve([]),
+      countAtRiskTasks(organizationId),
+      getTodayAttendance(session.user.memberId),
+    ]);
+
+  const focusTask = focusTaskRow
+    ? {
+        title: focusTaskRow.title,
+        projectName: focusTaskRow.project?.name ?? "Төсөлгүй",
+        dueLabel: focusTaskRow.dueAt ? focusTaskRow.dueAt.toLocaleString("mn-MN", { dateStyle: "medium", timeStyle: "short" }) : "Хугацаагүй",
+        progress: focusTaskRow.progress,
+        href: `/tasks/${focusTaskRow.id}`,
+      }
+    : null;
+
+  const topProjects = topProjectRows.map((p) => ({ id: p.id, name: p.name, progress: p.progress, statusLabel: projectStatusLabel[p.status] ?? p.status }));
+
+  const reviewQueue = reviewQueueRows.map((t) => ({
+    id: t.id,
+    title: t.title,
+    projectName: t.project?.name ?? "Төсөлгүй",
+    assigneeName: t.assignees[0]?.member.user.name ?? "Оноогоогүй",
+    statusLabel: taskStatusLabel[t.status] ?? t.status,
+  }));
+
+  const maxWorkload = Math.max(1, ...workloadRows.map((w) => w.activeCount));
+  const workload = workloadRows.map((w) => ({ id: w.id, name: w.name, activeCount: w.activeCount, pct: Math.round((w.activeCount / maxWorkload) * 100) }));
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <Dashboard
+      userName={session.user.name ?? "Хэрэглэгч"}
+      organizationName={session.user.organizationName}
+      notifications={notifications}
+      unreadCount={unreadCount}
+      taskMetrics={taskMetrics}
+      focusTask={focusTask}
+      topProjects={topProjects}
+      reviewQueue={reviewQueue}
+      workload={workload}
+      atRiskCount={atRiskCount}
+      attendance={{ checkInAt: formatTime(attendance?.checkInAt), checkOutAt: formatTime(attendance?.checkOutAt) }}
+      canManageSettings={can(session.user.role as AppRole, PERMISSIONS.settingsManage)}
+    />
   );
 }
