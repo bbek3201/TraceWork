@@ -82,6 +82,7 @@ model Organization {
   id          String   @id @default(cuid())
   name        String
   slug        String   @unique
+  inviteCode  String   @unique @default(cuid())
   timezone    String   @default("Asia/Ulaanbaatar")
   language    String   @default("mn")
   branches    Branch[]
@@ -100,9 +101,32 @@ model Organization {
   inventoryCounts InventoryCount[]
   inventoryMismatches InventoryMismatch[]
   taskTemplates TaskTemplate[]
+  invitations Invitation[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   deletedAt   DateTime?
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+model Invitation {
+  id             String   @id @default(cuid())
+  organizationId String
+  email          String
+  role           String   @default("EMPLOYEE")
+  jobTitle       String?
+  token          String   @unique @default(cuid())
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime
+  invitedById    String
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  invitedBy      User @relation(fields: [invitedById], references: [id])
+  @@unique([organizationId, email])
 }
 
 model Branch {
@@ -146,6 +170,7 @@ model User {
   createdInventoryCounts InventoryCount[]
   resolvedMismatches InventoryMismatch[]
   createdTaskTemplates TaskTemplate[]
+  sentInvitations Invitation[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

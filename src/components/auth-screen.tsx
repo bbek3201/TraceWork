@@ -1,20 +1,56 @@
 "use client";
-import { ArrowRight, Building2, CheckCircle2, ChevronLeft, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck, User } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, ChevronLeft, Eye, EyeOff, KeyRound, LockKeyhole, Mail, ShieldCheck, User } from "lucide-react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type OrgChoice = { id: string; name: string };
+type InviteInfo = { email: string; organizationName: string };
+
+// Admins share the join code as a full URL ("…/register?code=xxx"), and people
+// often paste the whole thing into the code field instead of just the code —
+// so accept either and pull the bare code out.
+function extractJoinCode(value: string) {
+  const trimmed = value.trim();
+  try {
+    const url = new URL(trimmed);
+    return url.searchParams.get("code") ?? trimmed;
+  } catch {
+    return trimmed;
+  }
+}
 
 export function AuthScreen({ mode = "login" }: { mode?: "login" | "register" }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const inviteToken = mode === "register" ? searchParams.get("invite") : null;
+  const prefillCode = mode === "register" ? searchParams.get("code") : null;
+
   const [show, setShow] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [orgChoices, setOrgChoices] = useState<OrgChoice[] | null>(null);
   const [pendingCredentials, setPendingCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [joinMode, setJoinMode] = useState<"create" | "code">(prefillCode ? "code" : "create");
+  const [inviteInfo, setInviteInfo] = useState<InviteInfo | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(Boolean(inviteToken));
+
+  useEffect(() => {
+    if (!inviteToken) return;
+    fetch(`/api/auth/invitations/${inviteToken}`)
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) {
+          setInviteError(data.error ?? "Урилга олдсонгүй.");
+          return;
+        }
+        setInviteInfo(data);
+      })
+      .catch(() => setInviteError("Урилгын мэдээллийг ачаалж чадсангүй."))
+      .finally(() => setInviteLoading(false));
+  }, [inviteToken]);
 
   async function completeSignIn(email: string, password: string, organizationId: string) {
     const result = await signIn("credentials", { email, password, organizationId, redirect: false });
@@ -32,17 +68,25 @@ export function AuthScreen({ mode = "login" }: { mode?: "login" | "register" }) 
     setError(null);
     setPending(true);
     const form = new FormData(e.currentTarget);
-    const email = String(form.get("email") ?? "");
+    const email = inviteInfo ? inviteInfo.email : String(form.get("email") ?? "");
     const password = String(form.get("password") ?? "");
 
     try {
       if (mode === "register") {
         const name = String(form.get("name") ?? "");
-        const organizationName = String(form.get("organizationName") ?? "");
+        const body: Record<string, string> = { name, email, password };
+        if (inviteToken) {
+          body.inviteToken = inviteToken;
+        } else if (joinMode === "code") {
+          body.joinCode = extractJoinCode(String(form.get("joinCode") ?? ""));
+        } else {
+          body.organizationName = String(form.get("organizationName") ?? "");
+        }
+
         const res = await fetch("/api/auth/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, organizationName, email, password }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -50,7 +94,7 @@ export function AuthScreen({ mode = "login" }: { mode?: "login" | "register" }) 
           setPending(false);
           return;
         }
-        // A brand-new org always has exactly one membership — no company picker needed.
+        // A brand-new registration always resolves to exactly one membership — no company picker needed.
         await completeSignIn(email, password, "");
         return;
       }
@@ -95,6 +139,8 @@ export function AuthScreen({ mode = "login" }: { mode?: "login" | "register" }) 
       setPending(false);
     }
   }
+
+  const inviteBlocked = Boolean(inviteToken) && (inviteLoading || Boolean(inviteError));
 
   return (
     <main className="auth-page">
@@ -143,42 +189,100 @@ export function AuthScreen({ mode = "login" }: { mode?: "login" | "register" }) 
         ) : (
           <form className="auth-form panel" onSubmit={submit}>
             <span className="form-icon"><Building2 /></span>
-            <h2>{mode === "login" ? "Тавтай морилно уу" : "Байгууллага үүсгэх"}</h2>
-            <p>{mode === "login" ? "Байгууллагын бүртгэлээрээ нэвтэрнэ үү" : "EVIDO-г ашиглаж эхлэхэд нэг алхам үлдлээ"}</p>
+            <h2>
+              {mode === "login"
+                ? "Тавтай морилно уу"
+                : inviteInfo
+                  ? `«${inviteInfo.organizationName}»-д нэгдэх`
+                  : "Байгууллага үүсгэх"}
+            </h2>
+            <p>
+              {mode === "login"
+                ? "Байгууллагын бүртгэлээрээ нэвтэрнэ үү"
+                : inviteInfo
+                  ? "Танийг энэ байгууллагад ажилтнаар урьсан байна"
+                  : "EVIDO-г ашиглаж эхлэхэд нэг алхам үлдлээ"}
+            </p>
 
-            {mode === "register" && (
+            {mode === "register" && inviteToken && inviteLoading && (
+              <p className="muted" style={{ marginTop: 14 }}>Урилгын мэдээллийг шалгаж байна...</p>
+            )}
+            {mode === "register" && inviteError && (
+              <p className="form-error" style={{ marginTop: 14 }}>
+                {inviteError} <Link href="/register">Шинэ байгууллага үүсгэх үү?</Link>
+              </p>
+            )}
+
+            {mode === "register" && !inviteBlocked && (
               <>
+                {!inviteToken && (
+                  <div style={{ display: "flex", gap: 8, margin: "14px 0 4px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setJoinMode("create")}
+                      style={{ flex: 1, height: 38, borderRadius: 7, fontSize: 12.5, border: joinMode === "create" ? "1px solid #9774ff" : "1px solid #263746", background: joinMode === "create" ? "#241a45" : "transparent", color: joinMode === "create" ? "#fff" : "#8592a2" }}
+                    >
+                      Шинэ байгууллага
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setJoinMode("code")}
+                      style={{ flex: 1, height: 38, borderRadius: 7, fontSize: 12.5, border: joinMode === "code" ? "1px solid #9774ff" : "1px solid #263746", background: joinMode === "code" ? "#241a45" : "transparent", color: joinMode === "code" ? "#fff" : "#8592a2" }}
+                    >
+                      Компанийн кодоор нэгдэх
+                    </button>
+                  </div>
+                )}
+
                 <label>
                   Таны нэр
                   <div><User /><input name="name" required minLength={2} placeholder="Бат-Эрдэнэ" /></div>
                 </label>
-                <label>
-                  Байгууллагын нэр
-                  <div><Building2 /><input name="organizationName" required minLength={2} placeholder="Номад Констракшн" /></div>
-                </label>
+
+                {inviteToken ? null : joinMode === "code" ? (
+                  <label>
+                    Байгууллагын код
+                    <div><KeyRound /><input name="joinCode" required minLength={4} defaultValue={prefillCode ?? ""} placeholder="Админаас авсан код" /></div>
+                  </label>
+                ) : (
+                  <label>
+                    Байгууллагын нэр
+                    <div><Building2 /><input name="organizationName" required minLength={2} placeholder="Номад Констракшн" /></div>
+                  </label>
+                )}
               </>
             )}
 
-            <label>
-              И-мэйл хаяг
-              <div><Mail /><input name="email" type="email" required placeholder="name@company.mn" /></div>
-            </label>
-            <label>
-              Нууц үг
-              <div>
-                <LockKeyhole />
-                <input name="password" type={show ? "text" : "password"} required minLength={8} placeholder="••••••••" />
-                <button type="button" onClick={() => setShow(!show)}>{show ? <EyeOff /> : <Eye />}</button>
-              </div>
-            </label>
+            {!inviteBlocked && (
+              <label>
+                И-мэйл хаяг
+                {inviteInfo ? (
+                  <div><Mail /><input value={inviteInfo.email} readOnly style={{ opacity: 0.7 }} /></div>
+                ) : (
+                  <div><Mail /><input name="email" type="email" required placeholder="name@company.mn" /></div>
+                )}
+              </label>
+            )}
+            {!inviteBlocked && (
+              <label>
+                Нууц үг
+                <div>
+                  <LockKeyhole />
+                  <input name="password" type={show ? "text" : "password"} required minLength={8} placeholder="••••••••" />
+                  <button type="button" onClick={() => setShow(!show)}>{show ? <EyeOff /> : <Eye />}</button>
+                </div>
+              </label>
+            )}
 
             {mode === "login" && <Link href="/forgot-password">Нууц үгээ мартсан уу?</Link>}
 
             {error && <p className="form-error">{error}</p>}
 
-            <button className="glow-button submit" disabled={pending}>
-              {pending ? "Нэвтэрч байна..." : <>{mode === "login" ? "Нэвтрэх" : "Бүртгүүлэх"}<ArrowRight /></>}
-            </button>
+            {!inviteBlocked && (
+              <button className="glow-button submit" disabled={pending}>
+                {pending ? "Нэвтэрч байна..." : <>{mode === "login" ? "Нэвтрэх" : "Бүртгүүлэх"}<ArrowRight /></>}
+              </button>
+            )}
 
             <small>
               {mode === "login"

@@ -1,6 +1,7 @@
 "use server";
 
 import type { EvidenceType, Prisma } from "@prisma/client";
+import { randomUUID } from "crypto";
 import { getServerSession } from "next-auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -213,6 +214,7 @@ export async function assignRole(formData: FormData) {
   const parsed = assignRoleSchema.safeParse({ memberId: formData.get("memberId"), role: formData.get("role") });
   if (!parsed.success) throw new Error("Мэдээллийг шалгана уу.");
   const { memberId, role } = parsed.data;
+  if (memberId === session.user.memberId) throw new Error("Өөрийн эрхийг өөрчлөх боломжгүй. Бусад админаас хүснэ үү.");
 
   const member = await prisma.organizationMember.findFirst({
     where: { id: memberId, organizationId: session.user.organizationId },
@@ -1297,53 +1299,156 @@ export async function updateOrganization(formData: FormData) {
 const inviteMemberSchema = z.object({
   email: z.string().trim().toLowerCase().email("И-мэйл хаягаа зөв оруулна уу."),
   jobTitle: z.string().trim().max(120).optional().or(z.literal("")),
+  role: z.enum(ALL_APP_ROLES as [string, ...string[]]).optional(),
 });
 
-export async function inviteMemberToOrg(formData: FormData) {
+export async function inviteMemberToOrg(formData: FormData): Promise<{ inviteUrl: string | null }> {
   const session = await requireSession();
   if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new Error("Ажилтан урих эрхгүй байна.");
 
-  const parsed = inviteMemberSchema.safeParse({ email: formData.get("email"), jobTitle: formData.get("jobTitle") });
+  const parsed = inviteMemberSchema.safeParse({
+    email: formData.get("email"),
+    jobTitle: formData.get("jobTitle"),
+    role: formData.get("role") || undefined,
+  });
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
-  const { email, jobTitle } = parsed.data;
+  const { email, jobTitle, role } = parsed.data;
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) throw new Error("Энэ и-мэйл хаягтай бүртгэлтэй хэрэглэгч олдсонгүй. Тэднийг эхлээд EVIDO-д бүртгүүлэхийг хүснэ үү.");
 
-  const existing = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId: session.user.organizationId, userId: user.id } },
-  });
-  if (existing) throw new Error("Энэ хэрэглэгч аль хэдийн байгууллагын гишүүн байна.");
+  if (user) {
+    const existing = await prisma.organizationMember.findUnique({
+      where: { organizationId_userId: { organizationId: session.user.organizationId, userId: user.id } },
+    });
+    if (existing) throw new Error("Энэ хэрэглэгч аль хэдийн байгууллагын гишүүн байна.");
+  }
 
-  const roles = await ensureOrgRoles(session.user.organizationId);
-  const employeeRole = roles.get("EMPLOYEE");
-
-  const member = await prisma.organizationMember.create({
-    data: {
+  // Whether or not an EVIDO account exists yet, joining another organization always
+  // goes through a pending invitation the recipient must accept — an admin should not
+  // be able to silently attach an existing account (with its own data) to their org.
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const token = randomUUID();
+  const invitation = await prisma.invitation.upsert({
+    where: { organizationId_email: { organizationId: session.user.organizationId, email } },
+    update: { status: "PENDING", jobTitle: jobTitle || undefined, role: role ?? "EMPLOYEE", expiresAt, invitedById: session.user.id, token },
+    create: {
       organizationId: session.user.organizationId,
-      userId: user.id,
-      status: "ACTIVE",
+      email,
       jobTitle: jobTitle || undefined,
-      roles: employeeRole ? { create: { roleId: employeeRole.id } } : undefined,
+      role: role ?? "EMPLOYEE",
+      expiresAt,
+      invitedById: session.user.id,
+      token,
     },
   });
   await logAudit(prisma, {
     organizationId: session.user.organizationId,
     actorId: session.user.id,
-    action: "member.invite",
-    entityType: "OrganizationMember",
-    entityId: member.id,
+    action: "invitation.create",
+    entityType: "Invitation",
+    entityId: invitation.id,
     newValue: { email },
   });
-  await notify(prisma, {
+
+  if (user) {
+    await notify(prisma, {
+      organizationId: session.user.organizationId,
+      userIds: [user.id],
+      type: "org_invite_pending",
+      title: `«${session.user.organizationName}» урьж байна`,
+      body: "Танийг ажилтнаар урьсан байна. Хүлээн авах эсвэл татгалзахаа сонгоно уу.",
+      entityType: "Invitation",
+      entityId: invitation.id,
+    });
+  }
+
+  revalidatePath("/settings");
+  return { inviteUrl: user ? `/invite/${invitation.token}` : `/register?invite=${invitation.token}` };
+}
+
+export async function regenerateInviteCode() {
+  const session = await requireSession();
+  if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new Error("Эрхгүй байна.");
+
+  const inviteCode = randomUUID();
+  await prisma.organization.update({ where: { id: session.user.organizationId }, data: { inviteCode } });
+  await logAudit(prisma, {
     organizationId: session.user.organizationId,
-    userIds: [user.id],
-    type: "org_invited",
-    title: "Байгууллагад нэмэгдлээ",
-    body: "Дараагийн удаа нэвтрэхдээ энэ байгууллагаа сонгоно уу.",
+    actorId: session.user.id,
+    action: "organization.invite_code_regenerate",
+    entityType: "Organization",
+    entityId: session.user.organizationId,
   });
 
   revalidatePath("/settings");
+}
+
+export async function revokeInvitation(formData: FormData) {
+  const session = await requireSession();
+
+  const invitationId = String(formData.get("invitationId") ?? "");
+  const invitation = await prisma.invitation.findUnique({ where: { id: invitationId } });
+  if (!invitation) throw new Error("Урилга олдсонгүй.");
+
+  // Either the inviting org's admin can cancel the invite, or the invited person
+  // themselves can decline it — nobody else has a reason to touch it.
+  const isAdmin = invitation.organizationId === session.user.organizationId && can(session.user.role as AppRole, PERMISSIONS.settingsManage);
+  const isRecipient = invitation.email === session.user.email;
+  if (!isAdmin && !isRecipient) throw new Error("Эрхгүй байна.");
+
+  await prisma.invitation.update({ where: { id: invitationId }, data: { status: "REVOKED" } });
+  await logAudit(prisma, {
+    organizationId: invitation.organizationId,
+    actorId: session.user.id,
+    action: isRecipient ? "invitation.decline" : "invitation.revoke",
+    entityType: "Invitation",
+    entityId: invitationId,
+  });
+
+  revalidatePath("/settings");
+  revalidatePath(`/invite/${invitation.token}`);
+}
+
+export async function acceptInvitation(formData: FormData) {
+  const session = await requireSession();
+
+  const token = String(formData.get("token") ?? "");
+  const invitation = await prisma.invitation.findUnique({ where: { token } });
+  if (!invitation || invitation.status !== "PENDING" || invitation.expiresAt < new Date()) {
+    throw new Error("Урилга хүчингүй эсвэл хугацаа дууссан байна.");
+  }
+  if (invitation.email !== session.user.email) throw new Error("Энэ урилга танд хамаарахгүй байна.");
+
+  const existing = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: invitation.organizationId, userId: session.user.id } },
+  });
+  if (existing) throw new Error("Та аль хэдийн энэ байгууллагын гишүүн байна.");
+
+  const roles = await ensureOrgRoles(invitation.organizationId);
+  const targetRole = roles.get(invitation.role as AppRole) ?? roles.get("EMPLOYEE");
+
+  await prisma.$transaction(async (tx) => {
+    const member = await tx.organizationMember.create({
+      data: {
+        organizationId: invitation.organizationId,
+        userId: session.user.id,
+        status: "ACTIVE",
+        jobTitle: invitation.jobTitle ?? undefined,
+        roles: targetRole ? { create: { roleId: targetRole.id } } : undefined,
+      },
+    });
+    await tx.invitation.update({ where: { id: invitation.id }, data: { status: "ACCEPTED" } });
+    await logAudit(tx, {
+      organizationId: invitation.organizationId,
+      actorId: session.user.id,
+      action: "invitation.accept",
+      entityType: "OrganizationMember",
+      entityId: member.id,
+      newValue: { email: invitation.email },
+    });
+  });
+
+  revalidatePath(`/invite/${token}`);
 }
 
 const taskTemplateSchema = z.object({

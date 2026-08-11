@@ -74,6 +74,20 @@ export function listOrgMembersWithRoles(organizationId: string) {
   });
 }
 
+export function listPendingInvitations(organizationId: string) {
+  return prisma.invitation.findMany({
+    where: { organizationId, status: "PENDING" },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export function getInvitationByToken(token: string) {
+  return prisma.invitation.findUnique({
+    where: { token },
+    include: { organization: true },
+  });
+}
+
 export function listEmployeeRows(organizationId: string) {
   return prisma.organizationMember.findMany({
     where: { organizationId },

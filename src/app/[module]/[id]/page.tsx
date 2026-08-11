@@ -191,7 +191,7 @@ export default async function Page({ params }: { params: Promise<{ module: strin
           branch: member.branch?.name ?? "—",
           roles: member.roles.map((r) => r.role.name),
           currentRole: member.roles[0]?.role.name ?? "EMPLOYEE",
-          canAssignRole: can(session.user.role as AppRole, PERMISSIONS.settingsManage),
+          canAssignRole: can(session.user.role as AppRole, PERMISSIONS.settingsManage) && !isSelf,
           canReassign: can(session.user.role as AppRole, PERMISSIONS.projectManage),
           canViewPerformance,
           performance,
