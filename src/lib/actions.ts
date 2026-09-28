@@ -540,6 +540,56 @@ export async function reviewTask(formData: FormData) {
   revalidatePath(`/tasks/${taskId}`);
 }
 
+/** Gives an unassigned (DRAFT) task its first assignee; later changes go through reassignTask. */
+export async function assignTask(formData: FormData) {
+  const session = await requireSession();
+  if (!can(session.user.role as AppRole, PERMISSIONS.taskCreate)) throw new Error("Ажил оноох эрхгүй байна.");
+
+  const taskId = String(formData.get("taskId") ?? "").trim();
+  const memberId = String(formData.get("memberId") ?? "").trim();
+  if (!taskId || !memberId) throw new Error("Хариуцагчийг сонгоно уу.");
+
+  const task = await prisma.task.findFirst({
+    where: { id: taskId, organizationId: session.user.organizationId },
+    include: { assignees: true },
+  });
+  if (!task) throw new Error("Ажил олдсонгүй.");
+  if (task.assignees.length > 0) throw new Error("Энэ ажилд хариуцагч аль хэдийн оноогдсон байна.");
+
+  const member = await prisma.organizationMember.findFirst({
+    where: { id: memberId, organizationId: session.user.organizationId, status: "ACTIVE" },
+  });
+  if (!member) throw new Error("Ажилтан олдсонгүй.");
+
+  const nextStatus = task.status === "DRAFT" ? "ASSIGNED" : task.status;
+  if (nextStatus !== task.status) assertTaskTransition(task.status as TaskState, nextStatus as TaskState);
+  await prisma.$transaction([
+    prisma.taskAssignee.create({ data: { taskId, memberId } }),
+    prisma.task.update({ where: { id: taskId }, data: { status: nextStatus } }),
+  ]);
+  await logAudit(prisma, {
+    organizationId: session.user.organizationId,
+    actorId: session.user.id,
+    action: "task.assign",
+    entityType: "Task",
+    entityId: taskId,
+    previousValue: { status: task.status },
+    newValue: { memberId, status: nextStatus },
+  });
+  await notify(prisma, {
+    organizationId: session.user.organizationId,
+    userIds: [member.userId],
+    type: "task_assigned",
+    title: "Шинэ ажил оноогдлоо",
+    body: task.title,
+    entityType: "Task",
+    entityId: taskId,
+  });
+
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath("/tasks");
+}
+
 const reassignSchema = z.object({
   taskId: z.string().trim().min(1),
   toMemberId: z.string().trim().min(1, "Орлох ажилтныг сонгоно уу."),
@@ -876,6 +926,7 @@ export async function uploadEvidence(formData: FormData) {
 
   const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
   if (!isAssignee) throw new Error("Зөвхөн хариуцагч нотолгоо хавсаргаж чадна.");
+  if (task.status !== "IN_PROGRESS") throw new Error("Нотолгоог зөвхөн гүйцэтгэж буй ажилд хавсаргана.");
 
   const requirement = await prisma.evidenceRequirement.findFirst({ where: { id: requirementId, taskId } });
   if (!requirement) throw new Error("Шаардлага олдсонгүй.");

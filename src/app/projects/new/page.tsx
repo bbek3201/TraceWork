@@ -3,12 +3,14 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, FolderKanban } from "lucide-react";
 import { authOptions } from "@/lib/auth";
+import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { listDepartments } from "@/lib/queries";
 import { createProject } from "@/lib/actions";
 
 export default async function NewProjectPage() {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
+  if (!can(session.user.role as AppRole, PERMISSIONS.projectManage)) redirect("/projects");
   const departments = await listDepartments(session.user.organizationId);
 
   return (

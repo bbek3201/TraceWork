@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ClipboardCheck } from "lucide-react";
 import { authOptions } from "@/lib/auth";
+import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { getTaskTemplate, listActiveMembers, listProjectOptions, listTaskOptions } from "@/lib/queries";
 import { taskStatusLabel } from "@/lib/labels";
 import { createTask } from "@/lib/actions";
@@ -14,6 +15,7 @@ export default async function NewTaskPage({
 }) {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
+  if (!can(session.user.role as AppRole, PERMISSIONS.taskCreate)) redirect("/tasks");
   const organizationId = session.user.organizationId;
   const { templateId } = await searchParams;
   const [projects, members, taskOptions, template] = await Promise.all([

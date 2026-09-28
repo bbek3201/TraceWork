@@ -46,9 +46,17 @@ export default async function Page({ params }: { params: Promise<{ module: strin
   if (module === "tasks") {
     const task = await getTaskDetail(id, organizationId);
     if (!task) notFound();
+    const canAssign =
+      task.assignees.length === 0 &&
+      !["COMPLETED", "CANCELLED"].includes(task.status) &&
+      can(session.user.role as AppRole, PERMISSIONS.taskCreate);
+    const assignableMembers = canAssign
+      ? (await listActiveMembers(organizationId)).map((m) => ({ id: m.id, name: m.user.name }))
+      : [];
 
     const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
-    const canReview = can(session.user.role as AppRole, PERMISSIONS.taskReview);
+    // Assignees never review their own work (enforced in reviewTask too).
+    const canReview = !isAssignee && can(session.user.role as AppRole, PERMISSIONS.taskReview);
     const history = task.submissions.flatMap((s) =>
       s.reviews.map((r) => ({
         version: s.version,
@@ -62,9 +70,9 @@ export default async function Page({ params }: { params: Promise<{ module: strin
     const latestSubmission = task.submissions[0];
     const approvedSoFar = latestSubmission ? latestSubmission.reviews.filter((r) => r.decision === "APPROVED").length : 0;
     const nextStepIsFinal = approvedSoFar + 1 >= approvalStepsRequired;
-    const canApprove = nextStepIsFinal
+    const canApprove = !isAssignee && (nextStepIsFinal
       ? can(session.user.role as AppRole, PERMISSIONS.taskApprove)
-      : can(session.user.role as AppRole, PERMISSIONS.taskReview);
+      : can(session.user.role as AppRole, PERMISSIONS.taskReview));
 
     return (
       <DetailScreen
@@ -106,6 +114,8 @@ export default async function Page({ params }: { params: Promise<{ module: strin
           approvalStep: approvedSoFar,
           approvalStepsRequired,
           canUpload: isAssignee && task.status === "IN_PROGRESS",
+          canAssign,
+          assignableMembers,
           blockedReason: task.blockedReason ? (taskBlockReasonLabel[task.blockedReason] ?? task.blockedReason) : null,
           blockedNote: task.blockedNote,
           dependencies: task.dependencies.map((d) => ({

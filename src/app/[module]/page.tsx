@@ -32,7 +32,7 @@ export default async function Page({ params }: { params: Promise<{ module: strin
           icon: "project",
           title: "Төслүүд",
           subtitle: "Байгууллагын бүх төслийн явцыг нэг дор удирдана",
-          createHref: "/projects/new",
+          createHref: can(session.user.role as AppRole, PERMISSIONS.projectManage) ? "/projects/new" : undefined,
           metrics: [
             ["Нийт төсөл", String(projects.length), "purple"],
             ["Идэвхтэй", String(projects.filter((p) => p.status === "ACTIVE").length), "blue"],
@@ -63,7 +63,7 @@ export default async function Page({ params }: { params: Promise<{ module: strin
           icon: "task",
           title: "Даалгавар",
           subtitle: "Бүх ажлыг төлөвлөж, явцыг бодитоор хянах",
-          createHref: "/tasks/new",
+          createHref: can(session.user.role as AppRole, PERMISSIONS.taskCreate) ? "/tasks/new" : undefined,
           metrics: [
             ["Нийт даалгавар", String(tasks.length), "purple"],
             ["Явцад", String(tasks.filter((t) => t.status === "IN_PROGRESS").length), "blue"],

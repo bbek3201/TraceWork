@@ -78,6 +78,7 @@ export default async function Home() {
       atRiskCount={atRiskCount}
       attendance={{ checkInAt: formatTime(attendance?.checkInAt), checkOutAt: formatTime(attendance?.checkOutAt) }}
       canManageSettings={can(session.user.role as AppRole, PERMISSIONS.settingsManage)}
+      canCreateTask={can(session.user.role as AppRole, PERMISSIONS.taskCreate)}
     />
   );
 }

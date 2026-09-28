@@ -1,5 +1,6 @@
 import { PrismaClient, ProjectStatus, TaskStatus } from "@prisma/client";
 import { hashPassword } from "../src/lib/password";
+import { startOfAppDay } from "../src/lib/time";
 import type { AppRole } from "../src/lib/permissions";
 import { ensureOrgRoles } from "../src/lib/roles";
 
@@ -128,7 +129,7 @@ async function main() {
     }
   }
 
-  const today = new Date(); today.setHours(0,0,0,0);
+  const today = startOfAppDay();
   for (let i = 0; i < 8; i++) {
     const late = i === 3;
     await prisma.attendance.upsert({

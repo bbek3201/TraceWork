@@ -59,7 +59,9 @@ export function AuthScreen({ mode = "login" }: { mode?: "login" | "register" }) 
       setPending(false);
       return;
     }
-    router.push(searchParams.get("callbackUrl") || "/");
+    // Only follow same-origin paths so a crafted link can't bounce users to another site.
+    const callbackUrl = searchParams.get("callbackUrl");
+    router.push(callbackUrl && /^\/(?![\/\\])/.test(callbackUrl) ? callbackUrl : "/");
     router.refresh();
   }
 

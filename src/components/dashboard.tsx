@@ -177,11 +177,11 @@ function DashboardHome({
 }
 
 export function Dashboard({
-  userName, organizationName, notifications, unreadCount, taskMetrics, focusTask, topProjects, reviewQueue, workload, atRiskCount, attendance, canManageSettings,
+  userName, organizationName, notifications, unreadCount, taskMetrics, focusTask, topProjects, reviewQueue, workload, atRiskCount, attendance, canManageSettings, canCreateTask,
 }: {
   userName: string; organizationName: string; notifications: NotificationItem[]; unreadCount: number;
   taskMetrics: TaskMetrics; focusTask: FocusTask; topProjects: TopProject[]; reviewQueue: ReviewQueueItem[];
-  workload: WorkloadItem[]; atRiskCount: number; attendance: AttendanceToday; canManageSettings: boolean;
+  workload: WorkloadItem[]; atRiskCount: number; attendance: AttendanceToday; canManageSettings: boolean; canCreateTask: boolean;
 }) {
   const [mobileNav, setMobileNav] = useState(false);
   return <div className="app-shell">
@@ -201,7 +201,7 @@ export function Dashboard({
           attendance={attendance}
         />
       </main>
-      <Link href="/tasks/new" className="fab" aria-label="Шинэ ажил үүсгэх"><Plus size={29}/></Link>
+      {canCreateTask && <Link href="/tasks/new" className="fab" aria-label="Шинэ ажил үүсгэх"><Plus size={29}/></Link>}
     </div>
   </div>;
 }

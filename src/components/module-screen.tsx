@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, BarChart3, Boxes, Building2, CalendarDays, Ch
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useActionState, useState } from "react";
-import { assignRole, markTaskBlocked, reassignTask, recordStockMovement, reviewTask, startTask, submitTaskForReview, uploadEvidence } from "@/lib/actions";
+import { assignRole, assignTask, markTaskBlocked, reassignTask, recordStockMovement, reviewTask, startTask, submitTaskForReview, uploadEvidence } from "@/lib/actions";
 import { roleLabel, stockMovementTypeLabel, taskBlockReasonLabel } from "@/lib/labels";
 
 const ASSIGNABLE_ROLES = ["EMPLOYEE", "TEAM_LEAD", "MANAGER", "HR", "EXECUTIVE", "ADMIN"];
@@ -114,6 +114,8 @@ type LiveTaskDetail = {
   approvalStep: number;
   approvalStepsRequired: number;
   canUpload: boolean;
+  canAssign: boolean;
+  assignableMembers: { id: string; name: string }[];
   blockedReason: string | null;
   blockedNote: string | null;
   dependencies: { id: string; title: string; statusLabel: string; typeLabel: string; done: boolean }[];
@@ -291,6 +293,33 @@ function MarkBlockedForm({ taskId }: { taskId: string }) {
 
 function errorBox(message: string) {
   return <p style={{ background: "#3a1420", border: "1px solid #6b1f34", color: "#ff8a9e", fontSize: 12.5, borderRadius: 8, padding: "10px 13px", marginTop: 8 }}>{message}</p>;
+}
+
+function AssignTaskForm({ taskId, members }: { taskId: string; members: { id: string; name: string }[] }) {
+  const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
+    formData.set("taskId", taskId);
+    try {
+      await assignTask(formData);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : "Алдаа гарлаа.";
+    }
+  }, null);
+
+  return (
+    <form action={formAction} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 24 }}>
+      <select name="memberId" required defaultValue="" style={{ background: "#0a141f", border: "1px solid #263746", borderRadius: 6, padding: "10px 12px", color: "#fff", minWidth: 200 }}>
+        <option value="" disabled>Хариуцагч сонгох</option>
+        {members.map((m) => (
+          <option key={m.id} value={m.id}>{m.name}</option>
+        ))}
+      </select>
+      <button disabled={pending} className="glow-button submit" type="submit" style={{ width: "auto", height: 42, padding: "0 18px", margin: 0 }}>
+        {pending ? "Түр хүлээнэ үү..." : "Ажил оноох"}
+      </button>
+      {error && errorBox(error)}
+    </form>
+  );
 }
 
 function StartTaskButton({ taskId }: { taskId: string }) {
@@ -511,6 +540,7 @@ export function DetailScreen({ slug, id, live }: { slug: string; id: string; liv
                       {live.blockedNote && <div style={{ marginTop: 4, color: "#e0c07a" }}>{live.blockedNote}</div>}
                     </div>
                   )}
+                  {live.canAssign && <AssignTaskForm taskId={id} members={live.assignableMembers} />}
                   {live.isAssignee && resumableTaskStatuses.has(live.status) && (
                     <div style={{ marginBottom: 24 }}><StartTaskButton taskId={id} /></div>
                   )}
