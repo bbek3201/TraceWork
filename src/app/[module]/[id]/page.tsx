@@ -6,6 +6,7 @@ import { handoverTransferTypeLabel, memberStatusLabel, okStatuses, projectStatus
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { requiredApprovalSteps } from "@/lib/task-machine";
 import { DetailScreen } from "@/components/module-screen";
+import { APP_TIME_ZONE } from "@/lib/time";
 
 export default async function Page({ params }: { params: Promise<{ module: string; id: string }> }) {
   const { module, id } = await params;
@@ -29,8 +30,8 @@ export default async function Page({ params }: { params: Promise<{ module: strin
           description: project.description || "Тайлбар оруулаагүй байна.",
           progress: project.progress,
           department: project.department?.name ?? "—",
-          startDate: project.startDate ? project.startDate.toLocaleDateString("mn-MN") : "—",
-          dueDate: project.dueDate ? project.dueDate.toLocaleDateString("mn-MN") : "—",
+          startDate: project.startDate ? project.startDate.toLocaleDateString("mn-MN", { timeZone: APP_TIME_ZONE }) : "—",
+          dueDate: project.dueDate ? project.dueDate.toLocaleDateString("mn-MN", { timeZone: APP_TIME_ZONE }) : "—",
           tasks: project.tasks.map((t) => ({
             id: t.id,
             title: t.title,
@@ -54,7 +55,7 @@ export default async function Page({ params }: { params: Promise<{ module: strin
         decision: r.decision,
         reason: r.reason,
         reviewer: r.reviewer.name,
-        at: r.createdAt.toLocaleString("mn-MN"),
+        at: r.createdAt.toLocaleString("mn-MN", { timeZone: APP_TIME_ZONE }),
       })),
     );
     const approvalStepsRequired = requiredApprovalSteps(task.riskLevel);
@@ -82,7 +83,7 @@ export default async function Page({ params }: { params: Promise<{ module: strin
           priority: task.priority,
           difficulty: task.difficulty,
           basePoints: task.basePoints.toString(),
-          dueDate: task.dueAt ? task.dueAt.toLocaleDateString("mn-MN") : "—",
+          dueDate: task.dueAt ? task.dueAt.toLocaleDateString("mn-MN", { timeZone: APP_TIME_ZONE }) : "—",
           assignees: task.assignees.map((a) => a.member.user.name),
           createdBy: task.createdBy.name,
           checklist: task.checklist.map((c) => ({ title: c.title, done: Boolean(c.completedAt) })),
@@ -95,7 +96,7 @@ export default async function Page({ params }: { params: Promise<{ module: strin
               fileAssetId: e.fileAssetId,
               note: e.note,
               uploadedBy: e.uploadedBy.name,
-              uploadedAt: e.createdAt.toLocaleString("mn-MN"),
+              uploadedAt: e.createdAt.toLocaleString("mn-MN", { timeZone: APP_TIME_ZONE }),
             })),
           })),
           isAssignee,
@@ -125,7 +126,7 @@ export default async function Page({ params }: { params: Promise<{ module: strin
             toName: h.toMember.user.name,
             typeLabel: handoverTransferTypeLabel[h.transferType] ?? h.transferType,
             note: h.note,
-            at: h.createdAt.toLocaleString("mn-MN"),
+            at: h.createdAt.toLocaleString("mn-MN", { timeZone: APP_TIME_ZONE }),
           })),
           score: task.score
             ? {
@@ -242,7 +243,7 @@ export default async function Page({ params }: { params: Promise<{ module: strin
             quantity: m.quantity,
             note: m.note,
             createdBy: m.createdBy.name,
-            at: m.createdAt.toLocaleString("mn-MN"),
+            at: m.createdAt.toLocaleString("mn-MN", { timeZone: APP_TIME_ZONE }),
           })),
         }}
       />

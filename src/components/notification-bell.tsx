@@ -3,6 +3,7 @@ import { Bell } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { markAllNotificationsRead, markNotificationRead } from "@/lib/actions";
+import { APP_TIME_ZONE } from "@/lib/time";
 
 export type NotificationItem = {
   id: string;
@@ -82,7 +83,7 @@ export function NotificationBell({ notifications, unreadCount }: { notifications
               >
                 <div style={{ fontSize: 12.5, fontWeight: n.readAt ? 400 : 700 }}>{n.title}</div>
                 {n.body && <div style={{ fontSize: 11.5, color: "#8793a3", marginTop: 2 }}>{n.body}</div>}
-                <div style={{ fontSize: 10.5, color: "#5c6a79", marginTop: 3 }}>{n.createdAt.toLocaleString("mn-MN")}</div>
+                <div style={{ fontSize: 10.5, color: "#5c6a79", marginTop: 3 }}>{n.createdAt.toLocaleString("mn-MN", { timeZone: APP_TIME_ZONE })}</div>
               </Link>
             ))}
           </div>

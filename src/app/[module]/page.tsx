@@ -5,6 +5,7 @@ import { computeStockOnHand, listEmployeeRows, listProductRows, listProjectRows,
 import { memberStatusLabel, okStatuses, projectStatusLabel, taskStatusLabel } from "@/lib/labels";
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { ModuleScreen } from "@/components/module-screen";
+import { APP_TIME_ZONE } from "@/lib/time";
 
 export default async function Page({ params }: { params: Promise<{ module: string }> }) {
   const { module } = await params;
@@ -49,7 +50,7 @@ export default async function Page({ params }: { params: Promise<{ module: strin
     const rows = tasks.map((t) => ({
       id: t.id,
       title: t.title,
-      subtitle: `${t.project?.name ?? "Төсөлгүй"} · ${t.dueAt ? t.dueAt.toLocaleDateString("mn-MN") : "Хугацаагүй"}`,
+      subtitle: `${t.project?.name ?? "Төсөлгүй"} · ${t.dueAt ? t.dueAt.toLocaleDateString("mn-MN", { timeZone: APP_TIME_ZONE }) : "Хугацаагүй"}`,
       progressLabel: `${t.progress}%`,
       status: taskStatusLabel[t.status] ?? t.status,
       ok: okStatuses.has(t.status),

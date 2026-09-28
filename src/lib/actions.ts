@@ -15,9 +15,11 @@ import { PERMISSIONS, can, type AppRole } from "@/lib/permissions";
 import { computeStockOnHand, listUserIdsWithPermission, startOfToday } from "@/lib/queries";
 import { ALL_APP_ROLES, ensureOrgRoles } from "@/lib/roles";
 import { saveUploadedFile } from "@/lib/storage";
+import { parseLocalDateTime } from "@/lib/time";
 import { assertTaskTransition, canSubmitEvidence, requiredApprovalSteps, type TaskState } from "@/lib/task-machine";
 
-const MAX_EVIDENCE_BYTES = 8 * 1024 * 1024;
+// Vercel rejects function request bodies over 4.5MB, so uploads must stay below that.
+const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
 
 async function requireSession() {
   const session = await getServerSession(authOptions);
@@ -35,6 +37,7 @@ const projectSchema = z.object({
 
 export async function createProject(formData: FormData) {
   const session = await requireSession();
+  if (!can(session.user.role as AppRole, PERMISSIONS.projectManage)) throw new Error("Төсөл үүсгэх эрхгүй байна.");
   const parsed = projectSchema.safeParse({
     name: formData.get("name"),
     description: formData.get("description"),
@@ -92,6 +95,7 @@ const taskSchema = z.object({
 
 export async function createTask(formData: FormData) {
   const session = await requireSession();
+  if (!can(session.user.role as AppRole, PERMISSIONS.taskCreate)) throw new Error("Ажил үүсгэх эрхгүй байна.");
   const parsed = taskSchema.safeParse({
     title: formData.get("title"),
     description: formData.get("description"),
@@ -152,7 +156,7 @@ export async function createTask(formData: FormData) {
       priority,
       difficulty,
       basePoints,
-      dueAt: dueAt ? new Date(dueAt) : undefined,
+      dueAt: dueAt ? parseLocalDateTime(dueAt) : undefined,
       createdById: session.user.id,
       assignees: assigneeMemberId ? { create: { memberId: assigneeMemberId } } : undefined,
     },
@@ -421,6 +425,9 @@ export async function reviewTask(formData: FormData) {
   }
 
   const task = await loadOrgTask(taskId, session.user.organizationId);
+  if (task.assignees.some((a) => a.memberId === session.user.memberId)) {
+    throw new Error("Өөрийн хариуцсан ажлыг өөрөө шалгах боломжгүй.");
+  }
   if (task.status === "SUBMITTED") {
     assertTaskTransition(task.status as TaskState, "UNDER_REVIEW");
   } else if (task.status !== "UNDER_REVIEW") {
@@ -859,7 +866,7 @@ export async function uploadEvidence(formData: FormData) {
 
   if (!taskId || !requirementId) throw new Error("Мэдээлэл дутуу байна.");
   if (!(file instanceof File) || file.size === 0) throw new Error("Файл сонгоно уу.");
-  if (file.size > MAX_EVIDENCE_BYTES) throw new Error("Файлын хэмжээ хэт том байна (дээд тал нь 8MB).");
+  if (file.size > MAX_EVIDENCE_BYTES) throw new Error("Файлын хэмжээ хэт том байна (дээд тал нь 4MB).");
 
   const task = await prisma.task.findFirst({
     where: { id: taskId, organizationId: session.user.organizationId },
@@ -951,8 +958,12 @@ export async function createPurchaseOrder(formData: FormData) {
     const productId = productIds[i]?.trim();
     const expectedQuantity = Number(expectedQuantities[i]);
     const invoiceQuantityRaw = invoiceQuantities[i]?.trim();
-    if (!productId || !Number.isFinite(expectedQuantity) || expectedQuantity <= 0) continue;
-    items.push({ productId, expectedQuantity, invoiceQuantity: invoiceQuantityRaw ? Number(invoiceQuantityRaw) : null });
+    if (!productId || !Number.isInteger(expectedQuantity) || expectedQuantity <= 0) continue;
+    const invoiceQuantity = invoiceQuantityRaw ? Number(invoiceQuantityRaw) : null;
+    if (invoiceQuantity !== null && (!Number.isInteger(invoiceQuantity) || invoiceQuantity < 0)) {
+      throw new Error("Нэхэмжлэхийн тоо хэмжээ буруу байна.");
+    }
+    items.push({ productId, expectedQuantity, invoiceQuantity });
   }
   if (items.length === 0) throw new Error("Дор хаяж нэг бараа оруулна уу.");
 
@@ -1389,6 +1400,7 @@ export async function revokeInvitation(formData: FormData) {
   const invitationId = String(formData.get("invitationId") ?? "");
   const invitation = await prisma.invitation.findUnique({ where: { id: invitationId } });
   if (!invitation) throw new Error("Урилга олдсонгүй.");
+  if (invitation.status !== "PENDING") throw new Error("Энэ урилга аль хэдийн шийдвэрлэгдсэн байна.");
 
   // Either the inviting org's admin can cancel the invite, or the invited person
   // themselves can decline it — nobody else has a reason to touch it.

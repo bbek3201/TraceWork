@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { startOfAppDay } from "@/lib/time";
 
 export function listDepartments(organizationId: string) {
   return prisma.department.findMany({ where: { organizationId }, orderBy: { name: "asc" } });
@@ -131,8 +132,7 @@ export function getEmployeeDetail(id: string, organizationId: string) {
 }
 
 export function startOfToday() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return startOfAppDay();
 }
 
 export function getTodayAttendance(memberId: string) {

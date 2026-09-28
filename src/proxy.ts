@@ -16,10 +16,8 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (token && isPublic) {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
-
+  // Token holders are not bounced away from public pages: a token may belong to a
+  // suspended/removed member (see authOptions.jwt), and pages send those back to /login.
   return NextResponse.next();
 }
 

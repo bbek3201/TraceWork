@@ -7,10 +7,11 @@ import { getTodayAttendance, listTodayAttendanceRows } from "@/lib/queries";
 import { attendanceStatusLabel } from "@/lib/labels";
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { AttendancePanel } from "@/components/attendance-panel";
+import { APP_TIME_ZONE } from "@/lib/time";
 
 function formatTime(date: Date | null | undefined) {
   if (!date) return null;
-  return date.toLocaleTimeString("mn-MN", { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString("mn-MN", { timeZone: APP_TIME_ZONE, hour: "2-digit", minute: "2-digit" });
 }
 
 export default async function AttendancePage() {

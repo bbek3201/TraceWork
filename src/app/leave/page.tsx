@@ -7,6 +7,7 @@ import { listLeaveRequests } from "@/lib/queries";
 import { leaveStatusLabel, leaveTypeLabel, okStatuses } from "@/lib/labels";
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { LeaveRequestForm, LeaveReviewActions } from "@/components/leave-panel";
+import { APP_TIME_ZONE } from "@/lib/time";
 
 export default async function LeavePage() {
   const session = await getServerSession(authOptions);
@@ -42,7 +43,7 @@ export default async function LeavePage() {
               </span>
               <span className={`pill ${okStatuses.has(r.status) ? "ok" : "warn"}`}>{leaveStatusLabel[r.status] ?? r.status}</span>
               <span style={{ fontSize: 12, color: "#9aa5b2" }}>
-                {r.startDate.toLocaleDateString("mn-MN")} – {r.endDate.toLocaleDateString("mn-MN")}
+                {r.startDate.toLocaleDateString("mn-MN", { timeZone: APP_TIME_ZONE })} – {r.endDate.toLocaleDateString("mn-MN", { timeZone: APP_TIME_ZONE })}
               </span>
               {canManage && r.status === "PENDING" ? (
                 <LeaveReviewActions leaveId={r.id} />

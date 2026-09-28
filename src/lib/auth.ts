@@ -65,10 +65,22 @@ export const authOptions: NextAuthOptions = {
         token.organizationName = u.organizationName;
         token.memberId = u.memberId;
         token.role = u.role;
+      } else if (token.memberId) {
+        // Re-read role and membership on every session check so role changes and
+        // suspensions take effect immediately instead of at the next login.
+        const member = await prisma.organizationMember.findUnique({
+          where: { id: token.memberId },
+          select: { status: true, roles: { select: { role: { select: { name: true } } }, take: 1 } },
+        });
+        token.revoked = !member || member.status !== "ACTIVE";
+        if (member) token.role = member.roles[0]?.role.name ?? "EMPLOYEE";
       }
       return token;
     },
     async session({ session, token }) {
+      if (token.revoked) {
+        return { expires: session.expires } as typeof session;
+      }
       if (session.user) {
         session.user.id = token.sub as string;
         session.user.organizationId = token.organizationId as string;

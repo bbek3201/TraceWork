@@ -28,5 +28,6 @@ declare module "next-auth/jwt" {
     organizationName?: string;
     memberId?: string;
     role?: string;
+    revoked?: boolean;
   }
 }

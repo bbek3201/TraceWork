@@ -7,7 +7,7 @@ import path from "path";
 const UPLOAD_ROOT = path.join(process.cwd(), ".data", "uploads");
 const BLOB_PREFIX = "uploads/";
 
-function useBlob() {
+function isBlobEnabled() {
   // Vercel connects stores via OIDC (BLOB_STORE_ID); older setups expose a read-write token.
   return Boolean(process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN);
 }
@@ -17,7 +17,7 @@ export async function saveUploadedFile(file: File) {
   const mimeType = file.type || "application/octet-stream";
   let storageKey: string = randomUUID();
 
-  if (useBlob()) {
+  if (isBlobEnabled()) {
     const blob = await put(`${BLOB_PREFIX}${storageKey}`, buffer, {
       access: "private",
       contentType: mimeType,

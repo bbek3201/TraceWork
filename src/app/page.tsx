@@ -15,10 +15,11 @@ import {
 import { projectStatusLabel, taskStatusLabel } from "@/lib/labels";
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { Dashboard } from "@/components/dashboard";
+import { APP_TIME_ZONE } from "@/lib/time";
 
 function formatTime(date: Date | null | undefined) {
   if (!date) return null;
-  return date.toLocaleTimeString("mn-MN", { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString("mn-MN", { timeZone: APP_TIME_ZONE, hour: "2-digit", minute: "2-digit" });
 }
 
 export default async function Home() {
@@ -44,7 +45,7 @@ export default async function Home() {
     ? {
         title: focusTaskRow.title,
         projectName: focusTaskRow.project?.name ?? "Төсөлгүй",
-        dueLabel: focusTaskRow.dueAt ? focusTaskRow.dueAt.toLocaleString("mn-MN", { dateStyle: "medium", timeStyle: "short" }) : "Хугацаагүй",
+        dueLabel: focusTaskRow.dueAt ? focusTaskRow.dueAt.toLocaleString("mn-MN", { timeZone: APP_TIME_ZONE, dateStyle: "medium", timeStyle: "short" }) : "Хугацаагүй",
         progress: focusTaskRow.progress,
         href: `/tasks/${focusTaskRow.id}`,
       }

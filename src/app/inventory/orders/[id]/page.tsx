@@ -7,6 +7,7 @@ import { getPurchaseOrderDetail } from "@/lib/queries";
 import { purchaseOrderStatusLabel } from "@/lib/labels";
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { ReceiveGoodsForm } from "@/components/receive-goods-form";
+import { APP_TIME_ZONE } from "@/lib/time";
 
 export default async function PurchaseOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -63,7 +64,7 @@ export default async function PurchaseOrderDetailPage({ params }: { params: Prom
                   <div key={r.id} style={{ border: "1px solid #233441", borderRadius: 8, padding: "10px 13px", margin: "8px 0" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
                       <CheckCircle2 size={16} color="#55d177" />
-                      <b style={{ fontSize: 12.5 }}>{r.receivedBy.name} · {r.createdAt.toLocaleString("mn-MN")}</b>
+                      <b style={{ fontSize: 12.5 }}>{r.receivedBy.name} · {r.createdAt.toLocaleString("mn-MN", { timeZone: APP_TIME_ZONE })}</b>
                     </div>
                     {r.items.map((it) => (
                       <div key={it.id} style={{ fontSize: 12, color: "#9aa5b2", marginLeft: 26 }}>
@@ -81,7 +82,7 @@ export default async function PurchaseOrderDetailPage({ params }: { params: Prom
               <dt>Нийлүүлэгч</dt><dd>{po.supplierName}</dd>
               <dt>Нэхэмжлэх</dt><dd>{po.invoiceNumber ?? "—"}</dd>
               <dt>Үүсгэсэн</dt><dd>{po.createdBy.name}</dd>
-              <dt>Огноо</dt><dd>{po.createdAt.toLocaleDateString("mn-MN")}</dd>
+              <dt>Огноо</dt><dd>{po.createdAt.toLocaleDateString("mn-MN", { timeZone: APP_TIME_ZONE })}</dd>
             </dl>
           </aside>
         </div>
