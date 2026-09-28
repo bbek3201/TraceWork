@@ -2,6 +2,7 @@
 import { useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { resolveMismatch } from "@/lib/actions";
+import { unwrap } from "@/lib/action-result";
 
 export function ResolveMismatchForm({ mismatchId }: { mismatchId: string }) {
   const router = useRouter();
@@ -9,7 +10,7 @@ export function ResolveMismatchForm({ mismatchId }: { mismatchId: string }) {
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("mismatchId", mismatchId);
     try {
-      await resolveMismatch(formData);
+      unwrap(await resolveMismatch(formData));
       router.refresh();
       return null;
     } catch (e) {

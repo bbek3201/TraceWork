@@ -1,3 +1,5 @@
+import { UserError } from "@/lib/action-result";
+
 export type TaskState = "DRAFT" | "ASSIGNED" | "IN_PROGRESS" | "BLOCKED" | "WAITING" | "SUBMITTED" | "UNDER_REVIEW" | "CHANGES_REQUIRED" | "APPROVED" | "REJECTED" | "COMPLETED" | "OVERDUE" | "CANCELLED";
 
 export const taskTransitions: Record<TaskState, TaskState[]> = {
@@ -10,7 +12,9 @@ export const taskTransitions: Record<TaskState, TaskState[]> = {
 };
 
 export function assertTaskTransition(from: TaskState, to: TaskState) {
-  if (!taskTransitions[from].includes(to)) throw new Error(`${from} → ${to} шилжилт зөвшөөрөгдөөгүй`);
+  if (!taskTransitions[from].includes(to)) {
+    throw new UserError("Ажлын одоогийн төлөвт энэ үйлдлийг хийх боломжгүй. Хуудсаа шинэчилнэ үү.");
+  }
 }
 
 export function canSubmitEvidence(required: string[], uploaded: string[]) {

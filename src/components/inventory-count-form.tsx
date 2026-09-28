@@ -2,6 +2,7 @@
 import { useActionState } from "react";
 import { useRouter } from "next/navigation";
 import { recordInventoryCount } from "@/lib/actions";
+import { unwrap } from "@/lib/action-result";
 
 type CountRow = { id: string; name: string; sku: string; unit: string; systemQuantity: number };
 
@@ -13,7 +14,7 @@ export function InventoryCountForm({ rows }: { rows: CountRow[] }) {
   const router = useRouter();
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     try {
-      await recordInventoryCount(formData);
+      unwrap(await recordInventoryCount(formData));
       router.push("/inventory/mismatches");
       return null;
     } catch (e) {

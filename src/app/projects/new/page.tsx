@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { listDepartments } from "@/lib/queries";
 import { createProject } from "@/lib/actions";
+import { ActionForm } from "@/components/action-form";
 
 export default async function NewProjectPage() {
   const session = await getServerSession(authOptions);
@@ -24,7 +25,7 @@ export default async function NewProjectPage() {
           <div><h1>Шинэ төсөл үүсгэх</h1><p>Төслийн үндсэн мэдээллийг бөглөнө үү</p></div>
         </div>
         <article className="panel" style={{ padding: 26 }}>
-          <form action={createProject} className="simple-form">
+          <ActionForm action={createProject} className="simple-form">
             <label>
               Төслийн нэр
               <input name="name" required minLength={2} placeholder="River Garden" />
@@ -51,7 +52,7 @@ export default async function NewProjectPage() {
               <input name="dueDate" type="date" />
             </label>
             <button className="glow-button submit" type="submit">Төсөл үүсгэх</button>
-          </form>
+          </ActionForm>
         </article>
       </section>
     </main>

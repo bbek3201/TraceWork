@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { listProductRows } from "@/lib/queries";
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { createPurchaseOrder } from "@/lib/actions";
+import { ActionForm } from "@/components/action-form";
 
 const ROW_COUNT = 6;
 
@@ -30,7 +31,7 @@ export default async function NewPurchaseOrderPage() {
           {products.length === 0 ? (
             <p className="muted">Эхлээд <Link href="/inventory/new">бараа бүртгэх</Link> шаардлагатай.</p>
           ) : (
-            <form action={createPurchaseOrder} className="simple-form">
+            <ActionForm action={createPurchaseOrder} className="simple-form">
               <label>PO дугаар<input name="poNumber" required placeholder="PO-1001" /></label>
               <label>Нийлүүлэгч<input name="supplierName" required placeholder="ХХК" /></label>
               <label>Нэхэмжлэхийн дугаар<input name="invoiceNumber" placeholder="Заавал биш" /></label>
@@ -55,7 +56,7 @@ export default async function NewPurchaseOrderPage() {
               </div>
 
               <button className="glow-button submit" type="submit">Захиалга үүсгэх</button>
-            </form>
+            </ActionForm>
           )}
         </article>
       </section>

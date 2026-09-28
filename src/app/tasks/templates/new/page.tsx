@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { evidenceTypeLabel } from "@/lib/labels";
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { createTaskTemplate } from "@/lib/actions";
+import { ActionForm } from "@/components/action-form";
 
 const CHECKLIST_ROWS = 5;
 const REQUIREMENT_ROWS = 4;
@@ -31,7 +32,7 @@ export default async function NewTaskTemplatePage() {
           <div><h1>Шинэ ажлын загвар</h1><p>Давтагдах ажилд ашиглах стандарт чеклист, шаардлагатай нотолгоог бэлдэнэ</p></div>
         </div>
         <article className="panel" style={{ padding: 26 }}>
-          <form action={createTaskTemplate} className="simple-form">
+          <ActionForm action={createTaskTemplate} className="simple-form">
             <label>Загварын нэр<input name="name" required minLength={2} placeholder="Бетон цутгалт" /></label>
             <label>Тайлбар<textarea name="description" rows={3} placeholder="Заавал биш" /></label>
 
@@ -71,7 +72,7 @@ export default async function NewTaskTemplatePage() {
             </div>
 
             <button className="glow-button submit" type="submit" style={{ marginTop: 16 }}>Загвар үүсгэх</button>
-          </form>
+          </ActionForm>
         </article>
       </section>
     </main>

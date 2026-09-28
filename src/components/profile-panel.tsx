@@ -1,6 +1,7 @@
 "use client";
 import { useActionState } from "react";
 import { changeMyPassword, updateMyProfile } from "@/lib/actions";
+import { unwrap } from "@/lib/action-result";
 
 function errorBox(message: string) {
   return <p className="form-error" style={{ marginTop: 10 }}>{message}</p>;
@@ -9,7 +10,7 @@ function errorBox(message: string) {
 export function ProfileNameForm({ currentName }: { currentName: string }) {
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     try {
-      await updateMyProfile(formData);
+      unwrap(await updateMyProfile(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -34,7 +35,7 @@ export function ChangePasswordForm() {
   const [state, formAction, pending] = useActionState(
     async (_prev: { error: string | null; ok: boolean }, formData: FormData) => {
       try {
-        await changeMyPassword(formData);
+        unwrap(await changeMyPassword(formData));
         return { error: null, ok: true };
       } catch (e) {
         return { error: e instanceof Error ? e.message : "Алдаа гарлаа.", ok: false };

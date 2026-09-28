@@ -7,6 +7,7 @@ import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { getTaskTemplate, listActiveMembers, listProjectOptions, listTaskOptions } from "@/lib/queries";
 import { taskStatusLabel } from "@/lib/labels";
 import { createTask } from "@/lib/actions";
+import { ActionForm } from "@/components/action-form";
 
 export default async function NewTaskPage({
   searchParams,
@@ -45,7 +46,7 @@ export default async function NewTaskPage({
           {projects.length === 0 ? (
             <p className="muted">Эхлээд <Link href="/projects/new">төсөл үүсгэх</Link> шаардлагатай.</p>
           ) : (
-            <form action={createTask} className="simple-form">
+            <ActionForm action={createTask} className="simple-form">
               {template && (
                 <p className="muted" style={{ marginTop: -4 }}>
                   «{template.name}» загвараас {Array.isArray(template.checklistItems) ? template.checklistItems.length : 0} чеклист,{" "}
@@ -122,7 +123,7 @@ export default async function NewTaskPage({
                 </select>
               </label>
               <button className="glow-button submit" type="submit">Даалгавар үүсгэх</button>
-            </form>
+            </ActionForm>
           )}
         </article>
       </section>

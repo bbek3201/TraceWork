@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { markAllNotificationsRead, markNotificationRead } from "@/lib/actions";
 import { APP_TIME_ZONE } from "@/lib/time";
+import { unwrap } from "@/lib/action-result";
 
 export type NotificationItem = {
   id: string;
@@ -32,7 +33,7 @@ export function NotificationBell({ notifications, unreadCount }: { notifications
       startTransition(async () => {
         const fd = new FormData();
         fd.set("notificationId", n.id);
-        await markNotificationRead(fd);
+        unwrap(await markNotificationRead(fd));
       });
     }
   }
@@ -66,7 +67,7 @@ export function NotificationBell({ notifications, unreadCount }: { notifications
               {unreadCount > 0 && (
                 <button
                   type="button"
-                  onClick={() => startTransition(async () => { await markAllNotificationsRead(); })}
+                  onClick={() => startTransition(async () => { unwrap(await markAllNotificationsRead()); })}
                   style={{ fontSize: 11, color: "#aa7dff", background: "none", border: 0 }}
                 >
                   Бүгдийг уншсан

@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import { type ActionResult, runAction, UserError } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { prisma } from "@/lib/db";
 import { notify } from "@/lib/notifications";
@@ -23,7 +24,7 @@ const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
 
 async function requireSession() {
   const session = await getServerSession(authOptions);
-  if (!session?.user) throw new Error("Нэвтрээгүй байна.");
+  if (!session?.user) throw new UserError("Нэвтрээгүй байна.");
   return session;
 }
 
@@ -35,47 +36,49 @@ const projectSchema = z.object({
   dueDate: z.string().trim().optional().or(z.literal("")),
 });
 
-export async function createProject(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.projectManage)) throw new Error("Төсөл үүсгэх эрхгүй байна.");
-  const parsed = projectSchema.safeParse({
-    name: formData.get("name"),
-    description: formData.get("description"),
-    departmentId: formData.get("departmentId"),
-    startDate: formData.get("startDate"),
-    dueDate: formData.get("dueDate"),
-  });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Төслийн мэдээллийг шалгана уу.");
-  const { name, description, departmentId, startDate, dueDate } = parsed.data;
-
-  if (departmentId) {
-    const department = await prisma.department.findFirst({
-      where: { id: departmentId, organizationId: session.user.organizationId },
+export async function createProject(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.projectManage)) throw new UserError("Төсөл үүсгэх эрхгүй байна.");
+    const parsed = projectSchema.safeParse({
+      name: formData.get("name"),
+      description: formData.get("description"),
+      departmentId: formData.get("departmentId"),
+      startDate: formData.get("startDate"),
+      dueDate: formData.get("dueDate"),
     });
-    if (!department) throw new Error("Хэлтэс олдсонгүй.");
-  }
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Төслийн мэдээллийг шалгана уу.");
+    const { name, description, departmentId, startDate, dueDate } = parsed.data;
 
-  const project = await prisma.project.create({
-    data: {
+    if (departmentId) {
+      const department = await prisma.department.findFirst({
+        where: { id: departmentId, organizationId: session.user.organizationId },
+      });
+      if (!department) throw new UserError("Хэлтэс олдсонгүй.");
+    }
+
+    const project = await prisma.project.create({
+      data: {
+        organizationId: session.user.organizationId,
+        name,
+        description: description || undefined,
+        departmentId: departmentId || undefined,
+        startDate: startDate ? new Date(startDate) : undefined,
+        dueDate: dueDate ? new Date(dueDate) : undefined,
+      },
+    });
+    await logAudit(prisma, {
       organizationId: session.user.organizationId,
-      name,
-      description: description || undefined,
-      departmentId: departmentId || undefined,
-      startDate: startDate ? new Date(startDate) : undefined,
-      dueDate: dueDate ? new Date(dueDate) : undefined,
-    },
-  });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "project.create",
-    entityType: "Project",
-    entityId: project.id,
-    newValue: { name: project.name },
-  });
+      actorId: session.user.id,
+      action: "project.create",
+      entityType: "Project",
+      entityId: project.id,
+      newValue: { name: project.name },
+    });
 
-  revalidatePath("/projects");
-  redirect("/projects");
+    revalidatePath("/projects");
+    redirect("/projects");
+  });
 }
 
 const taskSchema = z.object({
@@ -93,117 +96,119 @@ const taskSchema = z.object({
   templateId: z.string().trim().optional().or(z.literal("")),
 });
 
-export async function createTask(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.taskCreate)) throw new Error("Ажил үүсгэх эрхгүй байна.");
-  const parsed = taskSchema.safeParse({
-    title: formData.get("title"),
-    description: formData.get("description"),
-    projectId: formData.get("projectId"),
-    assigneeMemberId: formData.get("assigneeMemberId"),
-    priority: formData.get("priority"),
-    difficulty: formData.get("difficulty"),
-    basePoints: formData.get("basePoints"),
-    dueAt: formData.get("dueAt"),
-    dependsOnTaskId: formData.get("dependsOnTaskId"),
-    dependencyType: formData.get("dependencyType") || "FINISH_TO_START",
-    riskLevel: formData.get("riskLevel") || "LOW",
-    templateId: formData.get("templateId"),
-  });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Ажлын мэдээллийг шалгана уу.");
-  const { title, description, projectId, assigneeMemberId, priority, difficulty, basePoints, dueAt, dependsOnTaskId, dependencyType, riskLevel, templateId } = parsed.data;
-
-  let template: { checklistItems: unknown; requirementItems: unknown } | null = null;
-  if (templateId) {
-    template = await prisma.taskTemplate.findFirst({
-      where: { id: templateId, organizationId: session.user.organizationId },
-      select: { checklistItems: true, requirementItems: true },
+export async function createTask(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.taskCreate)) throw new UserError("Ажил үүсгэх эрхгүй байна.");
+    const parsed = taskSchema.safeParse({
+      title: formData.get("title"),
+      description: formData.get("description"),
+      projectId: formData.get("projectId"),
+      assigneeMemberId: formData.get("assigneeMemberId"),
+      priority: formData.get("priority"),
+      difficulty: formData.get("difficulty"),
+      basePoints: formData.get("basePoints"),
+      dueAt: formData.get("dueAt"),
+      dependsOnTaskId: formData.get("dependsOnTaskId"),
+      dependencyType: formData.get("dependencyType") || "FINISH_TO_START",
+      riskLevel: formData.get("riskLevel") || "LOW",
+      templateId: formData.get("templateId"),
     });
-    if (!template) throw new Error("Сонгосон загвар олдсонгүй.");
-  }
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Ажлын мэдээллийг шалгана уу.");
+    const { title, description, projectId, assigneeMemberId, priority, difficulty, basePoints, dueAt, dependsOnTaskId, dependencyType, riskLevel, templateId } = parsed.data;
 
-  let dependsOnTask: { id: string } | null = null;
-  if (dependsOnTaskId) {
-    dependsOnTask = await prisma.task.findFirst({
-      where: { id: dependsOnTaskId, organizationId: session.user.organizationId },
-      select: { id: true },
+    let template: { checklistItems: unknown; requirementItems: unknown } | null = null;
+    if (templateId) {
+      template = await prisma.taskTemplate.findFirst({
+        where: { id: templateId, organizationId: session.user.organizationId },
+        select: { checklistItems: true, requirementItems: true },
+      });
+      if (!template) throw new UserError("Сонгосон загвар олдсонгүй.");
+    }
+
+    let dependsOnTask: { id: string } | null = null;
+    if (dependsOnTaskId) {
+      dependsOnTask = await prisma.task.findFirst({
+        where: { id: dependsOnTaskId, organizationId: session.user.organizationId },
+        select: { id: true },
+      });
+      if (!dependsOnTask) throw new UserError("Сонгосон өмнөх ажил олдсонгүй.");
+    }
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, organizationId: session.user.organizationId },
     });
-    if (!dependsOnTask) throw new Error("Сонгосон өмнөх ажил олдсонгүй.");
-  }
+    if (!project) throw new UserError("Төсөл олдсонгүй.");
 
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, organizationId: session.user.organizationId },
-  });
-  if (!project) throw new Error("Төсөл олдсонгүй.");
+    let assigneeUserId: string | null = null;
+    if (assigneeMemberId) {
+      const member = await prisma.organizationMember.findFirst({
+        where: { id: assigneeMemberId, organizationId: session.user.organizationId },
+      });
+      if (!member) throw new UserError("Хариуцагч олдсонгүй.");
+      assigneeUserId = member.userId;
+    }
 
-  let assigneeUserId: string | null = null;
-  if (assigneeMemberId) {
-    const member = await prisma.organizationMember.findFirst({
-      where: { id: assigneeMemberId, organizationId: session.user.organizationId },
+    const task = await prisma.task.create({
+      data: {
+        organizationId: session.user.organizationId,
+        projectId,
+        title,
+        description: description || undefined,
+        status: assigneeMemberId ? "ASSIGNED" : "DRAFT",
+        riskLevel,
+        priority,
+        difficulty,
+        basePoints,
+        dueAt: dueAt ? parseLocalDateTime(dueAt) : undefined,
+        createdById: session.user.id,
+        assignees: assigneeMemberId ? { create: { memberId: assigneeMemberId } } : undefined,
+      },
     });
-    if (!member) throw new Error("Хариуцагч олдсонгүй.");
-    assigneeUserId = member.userId;
-  }
-
-  const task = await prisma.task.create({
-    data: {
-      organizationId: session.user.organizationId,
-      projectId,
-      title,
-      description: description || undefined,
-      status: assigneeMemberId ? "ASSIGNED" : "DRAFT",
-      riskLevel,
-      priority,
-      difficulty,
-      basePoints,
-      dueAt: dueAt ? parseLocalDateTime(dueAt) : undefined,
-      createdById: session.user.id,
-      assignees: assigneeMemberId ? { create: { memberId: assigneeMemberId } } : undefined,
-    },
-  });
-  if (dependsOnTask) {
-    await prisma.taskDependency.create({
-      data: { taskId: task.id, dependsOnTaskId: dependsOnTask.id, dependencyType },
-    });
-  }
-  if (template) {
-    const checklistItems = Array.isArray(template.checklistItems) ? (template.checklistItems as string[]) : [];
-    if (checklistItems.length > 0) {
-      await prisma.taskChecklist.createMany({
-        data: checklistItems.map((title) => ({ taskId: task.id, title })),
+    if (dependsOnTask) {
+      await prisma.taskDependency.create({
+        data: { taskId: task.id, dependsOnTaskId: dependsOnTask.id, dependencyType },
       });
     }
-    const requirementItems = Array.isArray(template.requirementItems)
-      ? (template.requirementItems as { type: string; title: string }[])
-      : [];
-    if (requirementItems.length > 0) {
-      await prisma.evidenceRequirement.createMany({
-        data: requirementItems.map((r) => ({ taskId: task.id, type: r.type as EvidenceType, title: r.title })),
-      });
+    if (template) {
+      const checklistItems = Array.isArray(template.checklistItems) ? (template.checklistItems as string[]) : [];
+      if (checklistItems.length > 0) {
+        await prisma.taskChecklist.createMany({
+          data: checklistItems.map((title) => ({ taskId: task.id, title })),
+        });
+      }
+      const requirementItems = Array.isArray(template.requirementItems)
+        ? (template.requirementItems as { type: string; title: string }[])
+        : [];
+      if (requirementItems.length > 0) {
+        await prisma.evidenceRequirement.createMany({
+          data: requirementItems.map((r) => ({ taskId: task.id, type: r.type as EvidenceType, title: r.title })),
+        });
+      }
     }
-  }
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "task.create",
-    entityType: "Task",
-    entityId: task.id,
-    newValue: { title: task.title, assigneeMemberId: assigneeMemberId || null, dependsOnTaskId: dependsOnTaskId || null, templateId: templateId || null },
-  });
-  if (assigneeUserId) {
-    await notify(prisma, {
+    await logAudit(prisma, {
       organizationId: session.user.organizationId,
-      userIds: [assigneeUserId],
-      type: "task_assigned",
-      title: "Шинэ ажил оноогдлоо",
-      body: task.title,
+      actorId: session.user.id,
+      action: "task.create",
       entityType: "Task",
       entityId: task.id,
+      newValue: { title: task.title, assigneeMemberId: assigneeMemberId || null, dependsOnTaskId: dependsOnTaskId || null, templateId: templateId || null },
     });
-  }
+    if (assigneeUserId) {
+      await notify(prisma, {
+        organizationId: session.user.organizationId,
+        userIds: [assigneeUserId],
+        type: "task_assigned",
+        title: "Шинэ ажил оноогдлоо",
+        body: task.title,
+        entityType: "Task",
+        entityId: task.id,
+      });
+    }
 
-  revalidatePath("/tasks");
-  redirect("/tasks");
+    revalidatePath("/tasks");
+    redirect("/tasks");
+  });
 }
 
 const assignRoleSchema = z.object({
@@ -211,38 +216,40 @@ const assignRoleSchema = z.object({
   role: z.enum(ALL_APP_ROLES as [string, ...string[]]),
 });
 
-export async function assignRole(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new Error("Эрх оноох эрхгүй байна.");
+export async function assignRole(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new UserError("Эрх оноох эрхгүй байна.");
 
-  const parsed = assignRoleSchema.safeParse({ memberId: formData.get("memberId"), role: formData.get("role") });
-  if (!parsed.success) throw new Error("Мэдээллийг шалгана уу.");
-  const { memberId, role } = parsed.data;
-  if (memberId === session.user.memberId) throw new Error("Өөрийн эрхийг өөрчлөх боломжгүй. Бусад админаас хүснэ үү.");
+    const parsed = assignRoleSchema.safeParse({ memberId: formData.get("memberId"), role: formData.get("role") });
+    if (!parsed.success) throw new UserError("Мэдээллийг шалгана уу.");
+    const { memberId, role } = parsed.data;
+    if (memberId === session.user.memberId) throw new UserError("Өөрийн эрхийг өөрчлөх боломжгүй. Бусад админаас хүснэ үү.");
 
-  const member = await prisma.organizationMember.findFirst({
-    where: { id: memberId, organizationId: session.user.organizationId },
+    const member = await prisma.organizationMember.findFirst({
+      where: { id: memberId, organizationId: session.user.organizationId },
+    });
+    if (!member) throw new UserError("Ажилтан олдсонгүй.");
+
+    const roles = await ensureOrgRoles(session.user.organizationId);
+    const targetRole = roles.get(role as AppRole);
+    if (!targetRole) throw new UserError("Эрх олдсонгүй.");
+
+    await prisma.$transaction([
+      prisma.userRole.deleteMany({ where: { memberId } }),
+      prisma.userRole.create({ data: { memberId, roleId: targetRole.id } }),
+    ]);
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "member.role_assign",
+      entityType: "OrganizationMember",
+      entityId: memberId,
+      newValue: { role },
+    });
+
+    revalidatePath(`/employees/${memberId}`);
   });
-  if (!member) throw new Error("Ажилтан олдсонгүй.");
-
-  const roles = await ensureOrgRoles(session.user.organizationId);
-  const targetRole = roles.get(role as AppRole);
-  if (!targetRole) throw new Error("Эрх олдсонгүй.");
-
-  await prisma.$transaction([
-    prisma.userRole.deleteMany({ where: { memberId } }),
-    prisma.userRole.create({ data: { memberId, roleId: targetRole.id } }),
-  ]);
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "member.role_assign",
-    entityType: "OrganizationMember",
-    entityId: memberId,
-    newValue: { role },
-  });
-
-  revalidatePath(`/employees/${memberId}`);
 }
 
 async function loadOrgTask(taskId: string, organizationId: string) {
@@ -255,7 +262,7 @@ async function loadOrgTask(taskId: string, organizationId: string) {
       dependencies: { include: { dependsOn: { select: { id: true, title: true, status: true } } } },
     },
   });
-  if (!task) throw new Error("Ажил олдсонгүй.");
+  if (!task) throw new UserError("Ажил олдсонгүй.");
   return task;
 }
 
@@ -264,36 +271,38 @@ const startedTaskStatuses = new Set(["IN_PROGRESS", "BLOCKED", "WAITING", "SUBMI
 function assertDependenciesSatisfied(task: { dependencies: { dependencyType: string; dependsOn: { title: string; status: string } }[] }) {
   for (const dep of task.dependencies) {
     if (dep.dependencyType === "FINISH_TO_START" && dep.dependsOn.status !== "COMPLETED") {
-      throw new Error(`"${dep.dependsOn.title}" ажил дуусаагүй байна. Өмнөх ажил дуусмагц эхлүүлнэ үү.`);
+      throw new UserError(`"${dep.dependsOn.title}" ажил дуусаагүй байна. Өмнөх ажил дуусмагц эхлүүлнэ үү.`);
     }
     if (dep.dependencyType === "START_TO_START" && !startedTaskStatuses.has(dep.dependsOn.status)) {
-      throw new Error(`"${dep.dependsOn.title}" ажил хараахан эхлээгүй байна.`);
+      throw new UserError(`"${dep.dependsOn.title}" ажил хараахан эхлээгүй байна.`);
     }
   }
 }
 
-export async function startTask(formData: FormData) {
-  const session = await requireSession();
-  const taskId = String(formData.get("taskId") ?? "").trim();
-  if (!taskId) throw new Error("Ажил тодорхойгүй байна.");
+export async function startTask(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const taskId = String(formData.get("taskId") ?? "").trim();
+    if (!taskId) throw new UserError("Ажил тодорхойгүй байна.");
 
-  const task = await loadOrgTask(taskId, session.user.organizationId);
-  const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
-  if (!isAssignee) throw new Error("Зөвхөн хариуцагч энэ үйлдлийг хийж чадна.");
+    const task = await loadOrgTask(taskId, session.user.organizationId);
+    const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
+    if (!isAssignee) throw new UserError("Зөвхөн хариуцагч энэ үйлдлийг хийж чадна.");
 
-  assertTaskTransition(task.status as TaskState, "IN_PROGRESS");
-  assertDependenciesSatisfied(task);
-  await prisma.task.update({ where: { id: taskId }, data: { status: "IN_PROGRESS", blockedReason: null, blockedNote: null } });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "task.start",
-    entityType: "Task",
-    entityId: taskId,
-    previousValue: { status: task.status },
-    newValue: { status: "IN_PROGRESS" },
+    assertTaskTransition(task.status as TaskState, "IN_PROGRESS");
+    assertDependenciesSatisfied(task);
+    await prisma.task.update({ where: { id: taskId }, data: { status: "IN_PROGRESS", blockedReason: null, blockedNote: null } });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "task.start",
+      entityType: "Task",
+      entityId: taskId,
+      previousValue: { status: task.status },
+      newValue: { status: "IN_PROGRESS" },
+    });
+    revalidatePath(`/tasks/${taskId}`);
   });
-  revalidatePath(`/tasks/${taskId}`);
 }
 
 const blockTaskSchema = z.object({
@@ -314,91 +323,95 @@ const blockTaskSchema = z.object({
   note: z.string().trim().max(1000).optional().or(z.literal("")),
 });
 
-export async function markTaskBlocked(formData: FormData) {
-  const session = await requireSession();
-  const parsed = blockTaskSchema.safeParse({
-    taskId: formData.get("taskId"),
-    targetStatus: formData.get("targetStatus"),
-    reason: formData.get("reason"),
-    note: formData.get("note"),
-  });
-  if (!parsed.success) throw new Error("Мэдээллийг шалгана уу.");
-  const { taskId, targetStatus, reason, note } = parsed.data;
+export async function markTaskBlocked(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const parsed = blockTaskSchema.safeParse({
+      taskId: formData.get("taskId"),
+      targetStatus: formData.get("targetStatus"),
+      reason: formData.get("reason"),
+      note: formData.get("note"),
+    });
+    if (!parsed.success) throw new UserError("Мэдээллийг шалгана уу.");
+    const { taskId, targetStatus, reason, note } = parsed.data;
 
-  const task = await loadOrgTask(taskId, session.user.organizationId);
-  const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
-  if (!isAssignee) throw new Error("Зөвхөн хариуцагч энэ үйлдлийг хийж чадна.");
+    const task = await loadOrgTask(taskId, session.user.organizationId);
+    const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
+    if (!isAssignee) throw new UserError("Зөвхөн хариуцагч энэ үйлдлийг хийж чадна.");
 
-  assertTaskTransition(task.status as TaskState, targetStatus);
-  await prisma.task.update({
-    where: { id: taskId },
-    data: { status: targetStatus, blockedReason: reason, blockedNote: note || undefined },
+    assertTaskTransition(task.status as TaskState, targetStatus);
+    await prisma.task.update({
+      where: { id: taskId },
+      data: { status: targetStatus, blockedReason: reason, blockedNote: note || undefined },
+    });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "task.block",
+      entityType: "Task",
+      entityId: taskId,
+      previousValue: { status: task.status },
+      newValue: { status: targetStatus, reason },
+    });
+    if (task.createdById !== session.user.id) {
+      await notify(prisma, {
+        organizationId: session.user.organizationId,
+        userIds: [task.createdById],
+        type: "task_blocked",
+        title: targetStatus === "BLOCKED" ? "Ажил хориглогдлоо" : "Ажил хүлээгдэж байна",
+        body: note || undefined,
+        entityType: "Task",
+        entityId: taskId,
+      });
+    }
+    revalidatePath(`/tasks/${taskId}`);
   });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "task.block",
-    entityType: "Task",
-    entityId: taskId,
-    previousValue: { status: task.status },
-    newValue: { status: targetStatus, reason },
-  });
-  if (task.createdById !== session.user.id) {
+}
+
+export async function submitTaskForReview(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const taskId = String(formData.get("taskId") ?? "").trim();
+    if (!taskId) throw new UserError("Ажил тодорхойгүй байна.");
+
+    const task = await loadOrgTask(taskId, session.user.organizationId);
+    const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
+    if (!isAssignee) throw new UserError("Зөвхөн хариуцагч энэ үйлдлийг хийж чадна.");
+
+    assertTaskTransition(task.status as TaskState, "SUBMITTED");
+
+    const requiredIds = task.requirements.filter((r) => r.required).map((r) => r.id);
+    const fulfilledIds = task.requirements.filter((r) => r.evidence.length > 0).map((r) => r.id);
+    if (!canSubmitEvidence(requiredIds, fulfilledIds)) {
+      throw new UserError("Шаардлагатай бүх нотолгоог хавсаргасны дараа илгээнэ үү.");
+    }
+
+    const nextVersion = (task.submissions[0]?.version ?? 0) + 1;
+    await prisma.$transaction([
+      prisma.taskSubmission.create({ data: { taskId, version: nextVersion } }),
+      prisma.task.update({ where: { id: taskId }, data: { status: "SUBMITTED" } }),
+    ]);
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "task.submit",
+      entityType: "Task",
+      entityId: taskId,
+      newValue: { version: nextVersion },
+    });
+    const reviewerIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.taskReview)).filter(
+      (userId) => userId !== session.user.id,
+    );
     await notify(prisma, {
       organizationId: session.user.organizationId,
-      userIds: [task.createdById],
-      type: "task_blocked",
-      title: targetStatus === "BLOCKED" ? "Ажил хориглогдлоо" : "Ажил хүлээгдэж байна",
-      body: note || undefined,
+      userIds: reviewerIds,
+      type: "task_submitted",
+      title: "Шалгах ажил ирлээ",
       entityType: "Task",
       entityId: taskId,
     });
-  }
-  revalidatePath(`/tasks/${taskId}`);
-}
-
-export async function submitTaskForReview(formData: FormData) {
-  const session = await requireSession();
-  const taskId = String(formData.get("taskId") ?? "").trim();
-  if (!taskId) throw new Error("Ажил тодорхойгүй байна.");
-
-  const task = await loadOrgTask(taskId, session.user.organizationId);
-  const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
-  if (!isAssignee) throw new Error("Зөвхөн хариуцагч энэ үйлдлийг хийж чадна.");
-
-  assertTaskTransition(task.status as TaskState, "SUBMITTED");
-
-  const requiredIds = task.requirements.filter((r) => r.required).map((r) => r.id);
-  const fulfilledIds = task.requirements.filter((r) => r.evidence.length > 0).map((r) => r.id);
-  if (!canSubmitEvidence(requiredIds, fulfilledIds)) {
-    throw new Error("Шаардлагатай бүх нотолгоог хавсаргасны дараа илгээнэ үү.");
-  }
-
-  const nextVersion = (task.submissions[0]?.version ?? 0) + 1;
-  await prisma.$transaction([
-    prisma.taskSubmission.create({ data: { taskId, version: nextVersion } }),
-    prisma.task.update({ where: { id: taskId }, data: { status: "SUBMITTED" } }),
-  ]);
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "task.submit",
-    entityType: "Task",
-    entityId: taskId,
-    newValue: { version: nextVersion },
+    revalidatePath(`/tasks/${taskId}`);
   });
-  const reviewerIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.taskReview)).filter(
-    (userId) => userId !== session.user.id,
-  );
-  await notify(prisma, {
-    organizationId: session.user.organizationId,
-    userIds: reviewerIds,
-    type: "task_submitted",
-    title: "Шалгах ажил ирлээ",
-    entityType: "Task",
-    entityId: taskId,
-  });
-  revalidatePath(`/tasks/${taskId}`);
 }
 
 const reviewDecisionTarget: Record<string, TaskState> = {
@@ -407,187 +420,195 @@ const reviewDecisionTarget: Record<string, TaskState> = {
   REJECTED: "REJECTED",
 };
 
-export async function reviewTask(formData: FormData) {
-  const session = await requireSession();
-  const taskId = String(formData.get("taskId") ?? "").trim();
-  const decision = String(formData.get("decision") ?? "").trim();
-  const reason = String(formData.get("reason") ?? "").trim();
-  const qualityScoreRaw = String(formData.get("qualityScore") ?? "").trim();
-  const qualityScore = qualityScoreRaw ? Number(qualityScoreRaw) : null;
-  if (!taskId) throw new Error("Ажил тодорхойгүй байна.");
-  if (!(decision in reviewDecisionTarget)) throw new Error("Шийдвэр буруу байна.");
-  if (decision !== "APPROVED" && !reason) throw new Error("Шалтгаанаа бичнэ үү.");
-  if (qualityScore !== null) {
-    if (!Number.isInteger(qualityScore) || qualityScore < 1 || qualityScore > 5) {
-      throw new Error("Чанарын үнэлгээ 1-5 хооронд байна.");
+export async function reviewTask(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const taskId = String(formData.get("taskId") ?? "").trim();
+    const decision = String(formData.get("decision") ?? "").trim();
+    const reason = String(formData.get("reason") ?? "").trim();
+    const qualityScoreRaw = String(formData.get("qualityScore") ?? "").trim();
+    const qualityScore = qualityScoreRaw ? Number(qualityScoreRaw) : null;
+    if (!taskId) throw new UserError("Ажил тодорхойгүй байна.");
+    if (!(decision in reviewDecisionTarget)) throw new UserError("Шийдвэр буруу байна.");
+    if (decision !== "APPROVED" && !reason) throw new UserError("Шалтгаанаа бичнэ үү.");
+    if (qualityScore !== null) {
+      if (!Number.isInteger(qualityScore) || qualityScore < 1 || qualityScore > 5) {
+        throw new UserError("Чанарын үнэлгээ 1-5 хооронд байна.");
+      }
+      if (qualityScore < 3 && !reason) throw new UserError("Бага үнэлгээ өгөхдөө шалтгаанаа бичнэ үү.");
     }
-    if (qualityScore < 3 && !reason) throw new Error("Бага үнэлгээ өгөхдөө шалтгаанаа бичнэ үү.");
-  }
 
-  const task = await loadOrgTask(taskId, session.user.organizationId);
-  if (task.assignees.some((a) => a.memberId === session.user.memberId)) {
-    throw new Error("Өөрийн хариуцсан ажлыг өөрөө шалгах боломжгүй.");
-  }
-  if (task.status === "SUBMITTED") {
-    assertTaskTransition(task.status as TaskState, "UNDER_REVIEW");
-  } else if (task.status !== "UNDER_REVIEW") {
-    throw new Error("Энэ ажил шалгах шатанд алга байна.");
-  }
-
-  const submission = task.submissions[0];
-  if (!submission) throw new Error("Илгээсэн хувилбар олдсонгүй.");
-
-  const approvedReviews = submission.reviews.filter((r) => r.decision === "APPROVED");
-  const requiredSteps = requiredApprovalSteps(task.riskLevel);
-  const isFinalStep = approvedReviews.length + 1 >= requiredSteps;
-
-  let targetStatus: TaskState;
-  if (decision === "APPROVED") {
-    if (approvedReviews.some((r) => r.reviewerId === session.user.id)) {
-      throw new Error("Та энэ ажлыг аль хэдийн зөвшөөрсөн байна.");
+    const task = await loadOrgTask(taskId, session.user.organizationId);
+    if (task.assignees.some((a) => a.memberId === session.user.memberId)) {
+      throw new UserError("Өөрийн хариуцсан ажлыг өөрөө шалгах боломжгүй.");
     }
-    const requiredPermission = isFinalStep ? PERMISSIONS.taskApprove : PERMISSIONS.taskReview;
-    if (!can(session.user.role as AppRole, requiredPermission)) {
-      throw new Error(isFinalStep ? "Эцсийн баталгаажуулалт хийх эрхгүй байна." : "Шалгах эрхгүй байна.");
+    if (task.status === "SUBMITTED") {
+      assertTaskTransition(task.status as TaskState, "UNDER_REVIEW");
+    } else if (task.status !== "UNDER_REVIEW") {
+      throw new UserError("Энэ ажил шалгах шатанд алга байна.");
     }
-    targetStatus = isFinalStep ? "COMPLETED" : "UNDER_REVIEW";
-  } else {
-    if (!can(session.user.role as AppRole, PERMISSIONS.taskReview)) throw new Error("Шалгах эрхгүй байна.");
-    targetStatus = reviewDecisionTarget[decision];
-  }
-  if (targetStatus !== "UNDER_REVIEW") {
-    assertTaskTransition("UNDER_REVIEW", targetStatus);
-  }
 
-  const writes: Prisma.PrismaPromise<unknown>[] = [
-    prisma.taskReview.create({
-      data: {
-        submissionId: submission.id,
-        reviewerId: session.user.id,
-        decision: decision as "APPROVED" | "CHANGES_REQUIRED" | "REJECTED",
-        reason: reason || undefined,
-        qualityScore: qualityScore ?? undefined,
-      },
-    }),
-    prisma.task.update({
-      where: { id: taskId },
-      data: { status: targetStatus, progress: targetStatus === "COMPLETED" ? 100 : undefined },
-    }),
-  ];
+    const submission = task.submissions[0];
+    if (!submission) throw new UserError("Илгээсэн хувилбар олдсонгүй.");
 
-  if (targetStatus === "COMPLETED") {
-    const qualityScores = [...approvedReviews.map((r) => r.qualityScore), qualityScore].filter(
-      (v): v is number => v !== null && v !== undefined,
-    );
-    const avgQuality = qualityScores.length > 0 ? qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length : 5;
-    const qualityCoefficient = avgQuality / 5;
-    const onTime = !task.dueAt || new Date() <= task.dueAt;
-    const deadlineCoefficient = onTime ? 1 : 0.8;
-    const totalRequirements = task.requirements.length;
-    const fulfilledRequirements = task.requirements.filter((r) => r.evidence.length > 0).length;
-    const evidenceCoefficient = totalRequirements > 0 ? fulfilledRequirements / totalRequirements : 1;
-    const basePoint = Number(task.basePoints);
-    const finalScore = basePoint * deadlineCoefficient * qualityCoefficient * evidenceCoefficient;
+    const approvedReviews = submission.reviews.filter((r) => r.decision === "APPROVED");
+    const requiredSteps = requiredApprovalSteps(task.riskLevel);
+    const isFinalStep = approvedReviews.length + 1 >= requiredSteps;
 
-    writes.push(
-      prisma.taskScore.upsert({
-        where: { taskId },
-        update: { basePoint, deadlineCoefficient, qualityCoefficient, evidenceCoefficient, finalScore },
-        create: { taskId, basePoint, deadlineCoefficient, qualityCoefficient, evidenceCoefficient, finalScore },
+    let targetStatus: TaskState;
+    if (decision === "APPROVED") {
+      if (approvedReviews.some((r) => r.reviewerId === session.user.id)) {
+        throw new UserError("Та энэ ажлыг аль хэдийн зөвшөөрсөн байна.");
+      }
+      const requiredPermission = isFinalStep ? PERMISSIONS.taskApprove : PERMISSIONS.taskReview;
+      if (!can(session.user.role as AppRole, requiredPermission)) {
+        throw new UserError(isFinalStep ? "Эцсийн баталгаажуулалт хийх эрхгүй байна." : "Шалгах эрхгүй байна.");
+      }
+      targetStatus = isFinalStep ? "COMPLETED" : "UNDER_REVIEW";
+    } else {
+      if (!can(session.user.role as AppRole, PERMISSIONS.taskReview)) throw new UserError("Шалгах эрхгүй байна.");
+      targetStatus = reviewDecisionTarget[decision];
+    }
+    if (targetStatus === "COMPLETED") {
+      // The final approval passes through APPROVED and completes the task in one step.
+      assertTaskTransition("UNDER_REVIEW", "APPROVED");
+      assertTaskTransition("APPROVED", "COMPLETED");
+    } else if (targetStatus !== "UNDER_REVIEW") {
+      assertTaskTransition("UNDER_REVIEW", targetStatus);
+    }
+
+    const writes: Prisma.PrismaPromise<unknown>[] = [
+      prisma.taskReview.create({
+        data: {
+          submissionId: submission.id,
+          reviewerId: session.user.id,
+          decision: decision as "APPROVED" | "CHANGES_REQUIRED" | "REJECTED",
+          reason: reason || undefined,
+          qualityScore: qualityScore ?? undefined,
+        },
       }),
-    );
-  }
+      prisma.task.update({
+        where: { id: taskId },
+        data: { status: targetStatus, progress: targetStatus === "COMPLETED" ? 100 : undefined },
+      }),
+    ];
 
-  await prisma.$transaction(writes);
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "task.review",
-    entityType: "Task",
-    entityId: taskId,
-    newValue: { decision, status: targetStatus, reason: reason || null, step: approvedReviews.length + 1, requiredSteps },
+    if (targetStatus === "COMPLETED") {
+      const qualityScores = [...approvedReviews.map((r) => r.qualityScore), qualityScore].filter(
+        (v): v is number => v !== null && v !== undefined,
+      );
+      const avgQuality = qualityScores.length > 0 ? qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length : 5;
+      const qualityCoefficient = avgQuality / 5;
+      const onTime = !task.dueAt || new Date() <= task.dueAt;
+      const deadlineCoefficient = onTime ? 1 : 0.8;
+      const totalRequirements = task.requirements.length;
+      const fulfilledRequirements = task.requirements.filter((r) => r.evidence.length > 0).length;
+      const evidenceCoefficient = totalRequirements > 0 ? fulfilledRequirements / totalRequirements : 1;
+      const basePoint = Number(task.basePoints);
+      const finalScore = basePoint * deadlineCoefficient * qualityCoefficient * evidenceCoefficient;
+
+      writes.push(
+        prisma.taskScore.upsert({
+          where: { taskId },
+          update: { basePoint, deadlineCoefficient, qualityCoefficient, evidenceCoefficient, finalScore },
+          create: { taskId, basePoint, deadlineCoefficient, qualityCoefficient, evidenceCoefficient, finalScore },
+        }),
+      );
+    }
+
+    await prisma.$transaction(writes);
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "task.review",
+      entityType: "Task",
+      entityId: taskId,
+      newValue: { decision, status: targetStatus, reason: reason || null, step: approvedReviews.length + 1, requiredSteps },
+    });
+
+    if (decision === "APPROVED" && !isFinalStep) {
+      const nextApproverIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.taskApprove)).filter(
+        (userId) => userId !== session.user.id,
+      );
+      await notify(prisma, {
+        organizationId: session.user.organizationId,
+        userIds: nextApproverIds,
+        type: "task_reviewed",
+        title: `Ажил ${approvedReviews.length + 1}/${requiredSteps} шатны баталгаажуулалт авлаа`,
+        body: task.title,
+        entityType: "Task",
+        entityId: taskId,
+      });
+    } else {
+      const decisionTitle: Record<string, string> = {
+        APPROVED: "Ажил эцэслэн батлагдлаа",
+        CHANGES_REQUIRED: "Ажилд засвар шаардлагатай",
+        REJECTED: "Ажил татгалзагдлаа",
+      };
+      await notify(prisma, {
+        organizationId: session.user.organizationId,
+        userIds: task.assignees.map((a) => a.member.userId),
+        type: "task_reviewed",
+        title: decisionTitle[decision] ?? "Ажил шалгагдлаа",
+        body: reason || undefined,
+        entityType: "Task",
+        entityId: taskId,
+      });
+    }
+    revalidatePath(`/tasks/${taskId}`);
   });
+}
 
-  if (decision === "APPROVED" && !isFinalStep) {
-    const nextApproverIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.taskApprove)).filter(
-      (userId) => userId !== session.user.id,
-    );
+/** Gives an unassigned (DRAFT) task its first assignee; later changes go through reassignTask. */
+export async function assignTask(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.taskCreate)) throw new UserError("Ажил оноох эрхгүй байна.");
+
+    const taskId = String(formData.get("taskId") ?? "").trim();
+    const memberId = String(formData.get("memberId") ?? "").trim();
+    if (!taskId || !memberId) throw new UserError("Хариуцагчийг сонгоно уу.");
+
+    const task = await prisma.task.findFirst({
+      where: { id: taskId, organizationId: session.user.organizationId },
+      include: { assignees: true },
+    });
+    if (!task) throw new UserError("Ажил олдсонгүй.");
+    if (task.assignees.length > 0) throw new UserError("Энэ ажилд хариуцагч аль хэдийн оноогдсон байна.");
+
+    const member = await prisma.organizationMember.findFirst({
+      where: { id: memberId, organizationId: session.user.organizationId, status: "ACTIVE" },
+    });
+    if (!member) throw new UserError("Ажилтан олдсонгүй.");
+
+    const nextStatus = task.status === "DRAFT" ? "ASSIGNED" : task.status;
+    if (nextStatus !== task.status) assertTaskTransition(task.status as TaskState, nextStatus as TaskState);
+    await prisma.$transaction([
+      prisma.taskAssignee.create({ data: { taskId, memberId } }),
+      prisma.task.update({ where: { id: taskId }, data: { status: nextStatus } }),
+    ]);
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "task.assign",
+      entityType: "Task",
+      entityId: taskId,
+      previousValue: { status: task.status },
+      newValue: { memberId, status: nextStatus },
+    });
     await notify(prisma, {
       organizationId: session.user.organizationId,
-      userIds: nextApproverIds,
-      type: "task_reviewed",
-      title: `Ажил ${approvedReviews.length + 1}/${requiredSteps} шатны баталгаажуулалт авлаа`,
+      userIds: [member.userId],
+      type: "task_assigned",
+      title: "Шинэ ажил оноогдлоо",
       body: task.title,
       entityType: "Task",
       entityId: taskId,
     });
-  } else {
-    const decisionTitle: Record<string, string> = {
-      APPROVED: "Ажил эцэслэн батлагдлаа",
-      CHANGES_REQUIRED: "Ажилд засвар шаардлагатай",
-      REJECTED: "Ажил татгалзагдлаа",
-    };
-    await notify(prisma, {
-      organizationId: session.user.organizationId,
-      userIds: task.assignees.map((a) => a.member.userId),
-      type: "task_reviewed",
-      title: decisionTitle[decision] ?? "Ажил шалгагдлаа",
-      body: reason || undefined,
-      entityType: "Task",
-      entityId: taskId,
-    });
-  }
-  revalidatePath(`/tasks/${taskId}`);
-}
 
-/** Gives an unassigned (DRAFT) task its first assignee; later changes go through reassignTask. */
-export async function assignTask(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.taskCreate)) throw new Error("Ажил оноох эрхгүй байна.");
-
-  const taskId = String(formData.get("taskId") ?? "").trim();
-  const memberId = String(formData.get("memberId") ?? "").trim();
-  if (!taskId || !memberId) throw new Error("Хариуцагчийг сонгоно уу.");
-
-  const task = await prisma.task.findFirst({
-    where: { id: taskId, organizationId: session.user.organizationId },
-    include: { assignees: true },
+    revalidatePath(`/tasks/${taskId}`);
+    revalidatePath("/tasks");
   });
-  if (!task) throw new Error("Ажил олдсонгүй.");
-  if (task.assignees.length > 0) throw new Error("Энэ ажилд хариуцагч аль хэдийн оноогдсон байна.");
-
-  const member = await prisma.organizationMember.findFirst({
-    where: { id: memberId, organizationId: session.user.organizationId, status: "ACTIVE" },
-  });
-  if (!member) throw new Error("Ажилтан олдсонгүй.");
-
-  const nextStatus = task.status === "DRAFT" ? "ASSIGNED" : task.status;
-  if (nextStatus !== task.status) assertTaskTransition(task.status as TaskState, nextStatus as TaskState);
-  await prisma.$transaction([
-    prisma.taskAssignee.create({ data: { taskId, memberId } }),
-    prisma.task.update({ where: { id: taskId }, data: { status: nextStatus } }),
-  ]);
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "task.assign",
-    entityType: "Task",
-    entityId: taskId,
-    previousValue: { status: task.status },
-    newValue: { memberId, status: nextStatus },
-  });
-  await notify(prisma, {
-    organizationId: session.user.organizationId,
-    userIds: [member.userId],
-    type: "task_assigned",
-    title: "Шинэ ажил оноогдлоо",
-    body: task.title,
-    entityType: "Task",
-    entityId: taskId,
-  });
-
-  revalidatePath(`/tasks/${taskId}`);
-  revalidatePath("/tasks");
 }
 
 const reassignSchema = z.object({
@@ -597,127 +618,133 @@ const reassignSchema = z.object({
   note: z.string().trim().max(1000).optional().or(z.literal("")),
 });
 
-export async function reassignTask(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.projectManage)) throw new Error("Ажил шилжүүлэх эрхгүй байна.");
+export async function reassignTask(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.projectManage)) throw new UserError("Ажил шилжүүлэх эрхгүй байна.");
 
-  const parsed = reassignSchema.safeParse({
-    taskId: formData.get("taskId"),
-    toMemberId: formData.get("toMemberId"),
-    transferType: formData.get("transferType"),
-    note: formData.get("note"),
-  });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
-  const { taskId, toMemberId, transferType, note } = parsed.data;
+    const parsed = reassignSchema.safeParse({
+      taskId: formData.get("taskId"),
+      toMemberId: formData.get("toMemberId"),
+      transferType: formData.get("transferType"),
+      note: formData.get("note"),
+    });
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
+    const { taskId, toMemberId, transferType, note } = parsed.data;
 
-  const task = await prisma.task.findFirst({
-    where: { id: taskId, organizationId: session.user.organizationId },
-    include: { assignees: { include: { member: { select: { userId: true } } } } },
-  });
-  if (!task) throw new Error("Ажил олдсонгүй.");
+    const task = await prisma.task.findFirst({
+      where: { id: taskId, organizationId: session.user.organizationId },
+      include: { assignees: { include: { member: { select: { userId: true } } } } },
+    });
+    if (!task) throw new UserError("Ажил олдсонгүй.");
 
-  const currentAssignee = task.assignees[0];
-  if (!currentAssignee) throw new Error("Энэ ажилд одоогоор хариуцагч байхгүй тул шилжүүлэх боломжгүй.");
-  if (currentAssignee.memberId === toMemberId) throw new Error("Энэ ажилтан аль хэдийн хариуцаж байна.");
+    const currentAssignee = task.assignees[0];
+    if (!currentAssignee) throw new UserError("Энэ ажилд одоогоор хариуцагч байхгүй тул шилжүүлэх боломжгүй.");
+    if (currentAssignee.memberId === toMemberId) throw new UserError("Энэ ажилтан аль хэдийн хариуцаж байна.");
 
-  const toMember = await prisma.organizationMember.findFirst({
-    where: { id: toMemberId, organizationId: session.user.organizationId, status: "ACTIVE" },
-  });
-  if (!toMember) throw new Error("Орлох ажилтан олдсонгүй.");
+    const toMember = await prisma.organizationMember.findFirst({
+      where: { id: toMemberId, organizationId: session.user.organizationId, status: "ACTIVE" },
+    });
+    if (!toMember) throw new UserError("Орлох ажилтан олдсонгүй.");
 
-  await prisma.$transaction(async (tx) => {
-    if (transferType === "PERMANENT") {
-      await tx.taskAssignee.deleteMany({ where: { taskId } });
-      await tx.taskAssignee.create({ data: { taskId, memberId: toMemberId } });
-    } else {
-      const existing = await tx.taskAssignee.findUnique({
-        where: { taskId_memberId: { taskId, memberId: toMemberId } },
+    await prisma.$transaction(async (tx) => {
+      if (transferType === "PERMANENT") {
+        await tx.taskAssignee.deleteMany({ where: { taskId } });
+        await tx.taskAssignee.create({ data: { taskId, memberId: toMemberId } });
+      } else {
+        const existing = await tx.taskAssignee.findUnique({
+          where: { taskId_memberId: { taskId, memberId: toMemberId } },
+        });
+        if (!existing) await tx.taskAssignee.create({ data: { taskId, memberId: toMemberId } });
+      }
+      await tx.taskHandover.create({
+        data: {
+          taskId,
+          fromMemberId: currentAssignee.memberId,
+          toMemberId,
+          transferType,
+          note: note || undefined,
+          createdById: session.user.id,
+        },
       });
-      if (!existing) await tx.taskAssignee.create({ data: { taskId, memberId: toMemberId } });
-    }
-    await tx.taskHandover.create({
-      data: {
-        taskId,
-        fromMemberId: currentAssignee.memberId,
-        toMemberId,
-        transferType,
-        note: note || undefined,
-        createdById: session.user.id,
+    });
+
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "task.reassign",
+      entityType: "Task",
+      entityId: taskId,
+      previousValue: { fromMemberId: currentAssignee.memberId },
+      newValue: { toMemberId, transferType },
+    });
+    await notify(prisma, {
+      organizationId: session.user.organizationId,
+      userIds: [toMember.userId],
+      type: "task_assigned",
+      title: "Танд ажил шилжлээ",
+      body: task.title,
+      entityType: "Task",
+      entityId: taskId,
+    });
+
+    revalidatePath(`/tasks/${taskId}`);
+    revalidatePath(`/employees/${currentAssignee.memberId}`);
+    revalidatePath(`/employees/${toMemberId}`);
+  });
+}
+
+export async function checkIn(): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const workDate = startOfToday();
+    const existing = await prisma.attendance.findUnique({
+      where: { memberId_workDate: { memberId: session.user.memberId, workDate } },
+    });
+    if (existing?.checkInAt) throw new UserError("Та өнөөдөр аль хэдийн ирц бүртгүүлсэн байна.");
+
+    const attendance = await prisma.attendance.upsert({
+      where: { memberId_workDate: { memberId: session.user.memberId, workDate } },
+      update: { checkInAt: new Date(), status: "PRESENT" },
+      create: {
+        organizationId: session.user.organizationId,
+        memberId: session.user.memberId,
+        workDate,
+        checkInAt: new Date(),
+        status: "PRESENT",
       },
     });
-  });
-
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "task.reassign",
-    entityType: "Task",
-    entityId: taskId,
-    previousValue: { fromMemberId: currentAssignee.memberId },
-    newValue: { toMemberId, transferType },
-  });
-  await notify(prisma, {
-    organizationId: session.user.organizationId,
-    userIds: [toMember.userId],
-    type: "task_assigned",
-    title: "Танд ажил шилжлээ",
-    body: task.title,
-    entityType: "Task",
-    entityId: taskId,
-  });
-
-  revalidatePath(`/tasks/${taskId}`);
-  revalidatePath(`/employees/${currentAssignee.memberId}`);
-  revalidatePath(`/employees/${toMemberId}`);
-}
-
-export async function checkIn() {
-  const session = await requireSession();
-  const workDate = startOfToday();
-  const existing = await prisma.attendance.findUnique({
-    where: { memberId_workDate: { memberId: session.user.memberId, workDate } },
-  });
-  if (existing?.checkInAt) throw new Error("Та өнөөдөр аль хэдийн ирц бүртгүүлсэн байна.");
-
-  const attendance = await prisma.attendance.upsert({
-    where: { memberId_workDate: { memberId: session.user.memberId, workDate } },
-    update: { checkInAt: new Date(), status: "PRESENT" },
-    create: {
+    await logAudit(prisma, {
       organizationId: session.user.organizationId,
-      memberId: session.user.memberId,
-      workDate,
-      checkInAt: new Date(),
-      status: "PRESENT",
-    },
+      actorId: session.user.id,
+      action: "attendance.check_in",
+      entityType: "Attendance",
+      entityId: attendance.id,
+    });
+    revalidatePath("/attendance");
   });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "attendance.check_in",
-    entityType: "Attendance",
-    entityId: attendance.id,
-  });
-  revalidatePath("/attendance");
 }
 
-export async function checkOut() {
-  const session = await requireSession();
-  const workDate = startOfToday();
-  const existing = await prisma.attendance.findUnique({
-    where: { memberId_workDate: { memberId: session.user.memberId, workDate } },
-  });
-  if (!existing?.checkInAt) throw new Error("Эхлээд ирц бүртгүүлнэ үү.");
-  if (existing.checkOutAt) throw new Error("Та өнөөдөр аль хэдийн явсан бүртгэлтэй байна.");
+export async function checkOut(): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const workDate = startOfToday();
+    const existing = await prisma.attendance.findUnique({
+      where: { memberId_workDate: { memberId: session.user.memberId, workDate } },
+    });
+    if (!existing?.checkInAt) throw new UserError("Эхлээд ирц бүртгүүлнэ үү.");
+    if (existing.checkOutAt) throw new UserError("Та өнөөдөр аль хэдийн явсан бүртгэлтэй байна.");
 
-  await prisma.attendance.update({ where: { id: existing.id }, data: { checkOutAt: new Date() } });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "attendance.check_out",
-    entityType: "Attendance",
-    entityId: existing.id,
+    await prisma.attendance.update({ where: { id: existing.id }, data: { checkOutAt: new Date() } });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "attendance.check_out",
+      entityType: "Attendance",
+      entityId: existing.id,
+    });
+    revalidatePath("/attendance");
   });
-  revalidatePath("/attendance");
 }
 
 const leaveSchema = z.object({
@@ -727,88 +754,92 @@ const leaveSchema = z.object({
   reason: z.string().trim().max(1000).optional().or(z.literal("")),
 });
 
-export async function requestLeave(formData: FormData) {
-  const session = await requireSession();
-  const parsed = leaveSchema.safeParse({
-    leaveType: formData.get("leaveType"),
-    startDate: formData.get("startDate"),
-    endDate: formData.get("endDate"),
-    reason: formData.get("reason"),
-  });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Хүсэлтийн мэдээллийг шалгана уу.");
-  const { leaveType, startDate, endDate, reason } = parsed.data;
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  if (end < start) throw new Error("Дуусах огноо эхлэх огнооноос өмнө байж болохгүй.");
+export async function requestLeave(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const parsed = leaveSchema.safeParse({
+      leaveType: formData.get("leaveType"),
+      startDate: formData.get("startDate"),
+      endDate: formData.get("endDate"),
+      reason: formData.get("reason"),
+    });
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Хүсэлтийн мэдээллийг шалгана уу.");
+    const { leaveType, startDate, endDate, reason } = parsed.data;
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (end < start) throw new UserError("Дуусах огноо эхлэх огнооноос өмнө байж болохгүй.");
 
-  const leave = await prisma.leaveRequest.create({
-    data: {
+    const leave = await prisma.leaveRequest.create({
+      data: {
+        organizationId: session.user.organizationId,
+        memberId: session.user.memberId,
+        leaveType,
+        startDate: start,
+        endDate: end,
+        reason: reason || undefined,
+      },
+    });
+    await logAudit(prisma, {
       organizationId: session.user.organizationId,
-      memberId: session.user.memberId,
-      leaveType,
-      startDate: start,
-      endDate: end,
-      reason: reason || undefined,
-    },
+      actorId: session.user.id,
+      action: "leave.request",
+      entityType: "LeaveRequest",
+      entityId: leave.id,
+      newValue: { leaveType, startDate: start.toISOString(), endDate: end.toISOString() },
+    });
+    const approverIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.attendanceManage)).filter(
+      (userId) => userId !== session.user.id,
+    );
+    await notify(prisma, {
+      organizationId: session.user.organizationId,
+      userIds: approverIds,
+      type: "leave_requested",
+      title: "Чөлөөний хүсэлт ирлээ",
+      entityType: "LeaveRequest",
+      entityId: leave.id,
+    });
+    revalidatePath("/leave");
   });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "leave.request",
-    entityType: "LeaveRequest",
-    entityId: leave.id,
-    newValue: { leaveType, startDate: start.toISOString(), endDate: end.toISOString() },
-  });
-  const approverIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.attendanceManage)).filter(
-    (userId) => userId !== session.user.id,
-  );
-  await notify(prisma, {
-    organizationId: session.user.organizationId,
-    userIds: approverIds,
-    type: "leave_requested",
-    title: "Чөлөөний хүсэлт ирлээ",
-    entityType: "LeaveRequest",
-    entityId: leave.id,
-  });
-  revalidatePath("/leave");
 }
 
-export async function reviewLeave(formData: FormData) {
-  const session = await requireSession();
-  const leaveId = String(formData.get("leaveId") ?? "").trim();
-  const decision = String(formData.get("decision") ?? "").trim();
-  if (!leaveId) throw new Error("Хүсэлт тодорхойгүй байна.");
-  if (decision !== "APPROVED" && decision !== "REJECTED") throw new Error("Шийдвэр буруу байна.");
-  if (!can(session.user.role as AppRole, PERMISSIONS.attendanceManage)) throw new Error("Зөвшөөрөх эрхгүй байна.");
+export async function reviewLeave(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const leaveId = String(formData.get("leaveId") ?? "").trim();
+    const decision = String(formData.get("decision") ?? "").trim();
+    if (!leaveId) throw new UserError("Хүсэлт тодорхойгүй байна.");
+    if (decision !== "APPROVED" && decision !== "REJECTED") throw new UserError("Шийдвэр буруу байна.");
+    if (!can(session.user.role as AppRole, PERMISSIONS.attendanceManage)) throw new UserError("Зөвшөөрөх эрхгүй байна.");
 
-  const leave = await prisma.leaveRequest.findFirst({
-    where: { id: leaveId, organizationId: session.user.organizationId },
-    include: { member: { select: { userId: true } } },
-  });
-  if (!leave) throw new Error("Хүсэлт олдсонгүй.");
-  if (leave.status !== "PENDING") throw new Error("Энэ хүсэлт аль хэдийн шийдвэрлэгдсэн байна.");
+    const leave = await prisma.leaveRequest.findFirst({
+      where: { id: leaveId, organizationId: session.user.organizationId },
+      include: { member: { select: { userId: true } } },
+    });
+    if (!leave) throw new UserError("Хүсэлт олдсонгүй.");
+    if (leave.status !== "PENDING") throw new UserError("Энэ хүсэлт аль хэдийн шийдвэрлэгдсэн байна.");
 
-  await prisma.leaveRequest.update({
-    where: { id: leaveId },
-    data: { status: decision, approvedById: session.user.id },
+    await prisma.leaveRequest.update({
+      where: { id: leaveId },
+      data: { status: decision, approvedById: session.user.id },
+    });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "leave.review",
+      entityType: "LeaveRequest",
+      entityId: leaveId,
+      newValue: { decision },
+    });
+    await notify(prisma, {
+      organizationId: session.user.organizationId,
+      userIds: [leave.member.userId],
+      type: "leave_reviewed",
+      title: decision === "APPROVED" ? "Чөлөөний хүсэлт зөвшөөрөгдлөө" : "Чөлөөний хүсэлт татгалзагдлаа",
+      entityType: "LeaveRequest",
+      entityId: leaveId,
+    });
+    revalidatePath("/leave");
   });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "leave.review",
-    entityType: "LeaveRequest",
-    entityId: leaveId,
-    newValue: { decision },
-  });
-  await notify(prisma, {
-    organizationId: session.user.organizationId,
-    userIds: [leave.member.userId],
-    type: "leave_reviewed",
-    title: decision === "APPROVED" ? "Чөлөөний хүсэлт зөвшөөрөгдлөө" : "Чөлөөний хүсэлт татгалзагдлаа",
-    entityType: "LeaveRequest",
-    entityId: leaveId,
-  });
-  revalidatePath("/leave");
 }
 
 const productSchema = z.object({
@@ -820,44 +851,46 @@ const productSchema = z.object({
   openingQuantity: z.coerce.number().int().min(0).max(1000000).default(0),
 });
 
-export async function createProduct(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new Error("Бараа нэмэх эрхгүй байна.");
+export async function createProduct(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new UserError("Бараа нэмэх эрхгүй байна.");
 
-  const parsed = productSchema.safeParse({
-    name: formData.get("name"),
-    sku: formData.get("sku"),
-    barcode: formData.get("barcode"),
-    unit: formData.get("unit") || "ш",
-    reorderPoint: formData.get("reorderPoint"),
-    openingQuantity: formData.get("openingQuantity"),
-  });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Барааны мэдээллийг шалгана уу.");
-  const { name, sku, barcode, unit, reorderPoint, openingQuantity } = parsed.data;
-
-  const existing = await prisma.product.findFirst({ where: { organizationId: session.user.organizationId, sku } });
-  if (existing) throw new Error("Энэ SKU-тай бараа бүртгэлтэй байна.");
-
-  const product = await prisma.product.create({
-    data: { organizationId: session.user.organizationId, name, sku, barcode: barcode || undefined, unit, reorderPoint },
-  });
-
-  if (openingQuantity > 0) {
-    await prisma.stockMovement.create({
-      data: { productId: product.id, type: "RECEIPT", quantity: openingQuantity, note: "Эхний үлдэгдэл", createdById: session.user.id },
+    const parsed = productSchema.safeParse({
+      name: formData.get("name"),
+      sku: formData.get("sku"),
+      barcode: formData.get("barcode"),
+      unit: formData.get("unit") || "ш",
+      reorderPoint: formData.get("reorderPoint"),
+      openingQuantity: formData.get("openingQuantity"),
     });
-  }
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "inventory.product_create",
-    entityType: "Product",
-    entityId: product.id,
-    newValue: { name: product.name, sku: product.sku, openingQuantity },
-  });
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Барааны мэдээллийг шалгана уу.");
+    const { name, sku, barcode, unit, reorderPoint, openingQuantity } = parsed.data;
 
-  revalidatePath("/inventory");
-  redirect("/inventory");
+    const existing = await prisma.product.findFirst({ where: { organizationId: session.user.organizationId, sku } });
+    if (existing) throw new UserError("Энэ SKU-тай бараа бүртгэлтэй байна.");
+
+    const product = await prisma.product.create({
+      data: { organizationId: session.user.organizationId, name, sku, barcode: barcode || undefined, unit, reorderPoint },
+    });
+
+    if (openingQuantity > 0) {
+      await prisma.stockMovement.create({
+        data: { productId: product.id, type: "RECEIPT", quantity: openingQuantity, note: "Эхний үлдэгдэл", createdById: session.user.id },
+      });
+    }
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "inventory.product_create",
+      entityType: "Product",
+      entityId: product.id,
+      newValue: { name: product.name, sku: product.sku, openingQuantity },
+    });
+
+    revalidatePath("/inventory");
+    redirect("/inventory");
+  });
 }
 
 const movementSchema = z.object({
@@ -867,119 +900,127 @@ const movementSchema = z.object({
   note: z.string().trim().max(500).optional().or(z.literal("")),
 });
 
-export async function recordStockMovement(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new Error("Барааны хөдөлгөөн бүртгэх эрхгүй байна.");
+export async function recordStockMovement(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new UserError("Барааны хөдөлгөөн бүртгэх эрхгүй байна.");
 
-  const parsed = movementSchema.safeParse({
-    productId: formData.get("productId"),
-    type: formData.get("type"),
-    quantity: formData.get("quantity"),
-    note: formData.get("note"),
+    const parsed = movementSchema.safeParse({
+      productId: formData.get("productId"),
+      type: formData.get("type"),
+      quantity: formData.get("quantity"),
+      note: formData.get("note"),
+    });
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Хөдөлгөөний мэдээллийг шалгана уу.");
+    const { productId, type, quantity, note } = parsed.data;
+    if (type !== "ADJUSTMENT" && quantity <= 0) throw new UserError("Тоо хэмжээ 0-ээс их байна.");
+    if (type === "ADJUSTMENT" && quantity === 0) throw new UserError("Тохируулгын хэмжээ 0 байж болохгүй.");
+
+    const product = await prisma.product.findFirst({ where: { id: productId, organizationId: session.user.organizationId } });
+    if (!product) throw new UserError("Бараа олдсонгүй.");
+
+    if (type === "ISSUE") {
+      const movements = await prisma.stockMovement.findMany({ where: { productId }, select: { type: true, quantity: true } });
+      const onHand = computeStockOnHand(movements);
+      if (quantity > onHand) throw new UserError(`Үлдэгдэл хүрэлцэхгүй байна (одоогийн үлдэгдэл: ${onHand}).`);
+    }
+
+    const movement = await prisma.stockMovement.create({
+      data: { productId, type, quantity, note: note || undefined, createdById: session.user.id },
+    });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "inventory.movement",
+      entityType: "StockMovement",
+      entityId: movement.id,
+      newValue: { productId, type, quantity },
+    });
+
+    revalidatePath(`/inventory/${productId}`);
+    revalidatePath("/inventory");
   });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Хөдөлгөөний мэдээллийг шалгана уу.");
-  const { productId, type, quantity, note } = parsed.data;
-  if (type !== "ADJUSTMENT" && quantity <= 0) throw new Error("Тоо хэмжээ 0-ээс их байна.");
-  if (type === "ADJUSTMENT" && quantity === 0) throw new Error("Тохируулгын хэмжээ 0 байж болохгүй.");
-
-  const product = await prisma.product.findFirst({ where: { id: productId, organizationId: session.user.organizationId } });
-  if (!product) throw new Error("Бараа олдсонгүй.");
-
-  if (type === "ISSUE") {
-    const movements = await prisma.stockMovement.findMany({ where: { productId }, select: { type: true, quantity: true } });
-    const onHand = computeStockOnHand(movements);
-    if (quantity > onHand) throw new Error(`Үлдэгдэл хүрэлцэхгүй байна (одоогийн үлдэгдэл: ${onHand}).`);
-  }
-
-  const movement = await prisma.stockMovement.create({
-    data: { productId, type, quantity, note: note || undefined, createdById: session.user.id },
-  });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "inventory.movement",
-    entityType: "StockMovement",
-    entityId: movement.id,
-    newValue: { productId, type, quantity },
-  });
-
-  revalidatePath(`/inventory/${productId}`);
-  revalidatePath("/inventory");
 }
 
-export async function uploadEvidence(formData: FormData) {
-  const session = await requireSession();
-  const taskId = String(formData.get("taskId") ?? "").trim();
-  const requirementId = String(formData.get("requirementId") ?? "").trim();
-  const note = String(formData.get("note") ?? "").trim();
-  const file = formData.get("file");
+export async function uploadEvidence(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const taskId = String(formData.get("taskId") ?? "").trim();
+    const requirementId = String(formData.get("requirementId") ?? "").trim();
+    const note = String(formData.get("note") ?? "").trim();
+    const file = formData.get("file");
 
-  if (!taskId || !requirementId) throw new Error("Мэдээлэл дутуу байна.");
-  if (!(file instanceof File) || file.size === 0) throw new Error("Файл сонгоно уу.");
-  if (file.size > MAX_EVIDENCE_BYTES) throw new Error("Файлын хэмжээ хэт том байна (дээд тал нь 4MB).");
+    if (!taskId || !requirementId) throw new UserError("Мэдээлэл дутуу байна.");
+    if (!(file instanceof File) || file.size === 0) throw new UserError("Файл сонгоно уу.");
+    if (file.size > MAX_EVIDENCE_BYTES) throw new UserError("Файлын хэмжээ хэт том байна (дээд тал нь 4MB).");
 
-  const task = await prisma.task.findFirst({
-    where: { id: taskId, organizationId: session.user.organizationId },
-    include: { assignees: true },
+    const task = await prisma.task.findFirst({
+      where: { id: taskId, organizationId: session.user.organizationId },
+      include: { assignees: true },
+    });
+    if (!task) throw new UserError("Ажил олдсонгүй.");
+
+    const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
+    if (!isAssignee) throw new UserError("Зөвхөн хариуцагч нотолгоо хавсаргаж чадна.");
+    if (task.status !== "IN_PROGRESS") throw new UserError("Нотолгоог зөвхөн гүйцэтгэж буй ажилд хавсаргана.");
+
+    const requirement = await prisma.evidenceRequirement.findFirst({ where: { id: requirementId, taskId } });
+    if (!requirement) throw new UserError("Шаардлага олдсонгүй.");
+
+    const saved = await saveUploadedFile(file);
+    const existingVersions = await prisma.taskEvidence.count({ where: { requirementId } });
+
+    await prisma.$transaction(
+      async (tx) => {
+        const asset = await tx.fileAsset.create({ data: saved });
+        const evidence = await tx.taskEvidence.create({
+          data: {
+            taskId,
+            requirementId,
+            fileAssetId: asset.id,
+            uploadedById: session.user.id,
+            version: existingVersions + 1,
+            note: note || undefined,
+          },
+        });
+        await logAudit(tx, {
+          organizationId: session.user.organizationId,
+          actorId: session.user.id,
+          action: "task.evidence_upload",
+          entityType: "TaskEvidence",
+          entityId: evidence.id,
+          newValue: { taskId, requirementId, fileName: saved.fileName },
+        });
+      },
+      { timeout: 15000 },
+    );
+
+    revalidatePath(`/tasks/${taskId}`);
   });
-  if (!task) throw new Error("Ажил олдсонгүй.");
-
-  const isAssignee = task.assignees.some((a) => a.memberId === session.user.memberId);
-  if (!isAssignee) throw new Error("Зөвхөн хариуцагч нотолгоо хавсаргаж чадна.");
-  if (task.status !== "IN_PROGRESS") throw new Error("Нотолгоог зөвхөн гүйцэтгэж буй ажилд хавсаргана.");
-
-  const requirement = await prisma.evidenceRequirement.findFirst({ where: { id: requirementId, taskId } });
-  if (!requirement) throw new Error("Шаардлага олдсонгүй.");
-
-  const saved = await saveUploadedFile(file);
-  const existingVersions = await prisma.taskEvidence.count({ where: { requirementId } });
-
-  await prisma.$transaction(
-    async (tx) => {
-      const asset = await tx.fileAsset.create({ data: saved });
-      const evidence = await tx.taskEvidence.create({
-        data: {
-          taskId,
-          requirementId,
-          fileAssetId: asset.id,
-          uploadedById: session.user.id,
-          version: existingVersions + 1,
-          note: note || undefined,
-        },
-      });
-      await logAudit(tx, {
-        organizationId: session.user.organizationId,
-        actorId: session.user.id,
-        action: "task.evidence_upload",
-        entityType: "TaskEvidence",
-        entityId: evidence.id,
-        newValue: { taskId, requirementId, fileName: saved.fileName },
-      });
-    },
-    { timeout: 15000 },
-  );
-
-  revalidatePath(`/tasks/${taskId}`);
 }
 
-export async function markNotificationRead(formData: FormData) {
-  const session = await requireSession();
-  const notificationId = String(formData.get("notificationId") ?? "").trim();
-  if (!notificationId) return;
-  await prisma.notification.updateMany({
-    where: { id: notificationId, organizationId: session.user.organizationId, userId: session.user.id },
-    data: { readAt: new Date() },
+export async function markNotificationRead(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const notificationId = String(formData.get("notificationId") ?? "").trim();
+    if (!notificationId) return;
+    await prisma.notification.updateMany({
+      where: { id: notificationId, organizationId: session.user.organizationId, userId: session.user.id },
+      data: { readAt: new Date() },
+    });
+    revalidatePath("/");
   });
-  revalidatePath("/");
 }
 
-export async function markAllNotificationsRead() {
-  const session = await requireSession();
-  await prisma.notification.updateMany({
-    where: { organizationId: session.user.organizationId, userId: session.user.id, readAt: null },
-    data: { readAt: new Date() },
+export async function markAllNotificationsRead(): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    await prisma.notification.updateMany({
+      where: { organizationId: session.user.organizationId, userId: session.user.id, readAt: null },
+      data: { readAt: new Date() },
+    });
+    revalidatePath("/");
   });
-  revalidatePath("/");
 }
 
 const purchaseOrderSchema = z.object({
@@ -988,68 +1029,70 @@ const purchaseOrderSchema = z.object({
   invoiceNumber: z.string().trim().max(60).optional().or(z.literal("")),
 });
 
-export async function createPurchaseOrder(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new Error("Захиалга үүсгэх эрхгүй байна.");
+export async function createPurchaseOrder(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new UserError("Захиалга үүсгэх эрхгүй байна.");
 
-  const parsed = purchaseOrderSchema.safeParse({
-    poNumber: formData.get("poNumber"),
-    supplierName: formData.get("supplierName"),
-    invoiceNumber: formData.get("invoiceNumber"),
-  });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
-  const { poNumber, supplierName, invoiceNumber } = parsed.data;
+    const parsed = purchaseOrderSchema.safeParse({
+      poNumber: formData.get("poNumber"),
+      supplierName: formData.get("supplierName"),
+      invoiceNumber: formData.get("invoiceNumber"),
+    });
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
+    const { poNumber, supplierName, invoiceNumber } = parsed.data;
 
-  const productIds = formData.getAll("productId").map(String);
-  const expectedQuantities = formData.getAll("expectedQuantity").map(String);
-  const invoiceQuantities = formData.getAll("invoiceQuantity").map(String);
+    const productIds = formData.getAll("productId").map(String);
+    const expectedQuantities = formData.getAll("expectedQuantity").map(String);
+    const invoiceQuantities = formData.getAll("invoiceQuantity").map(String);
 
-  const items: { productId: string; expectedQuantity: number; invoiceQuantity: number | null }[] = [];
-  for (let i = 0; i < productIds.length; i++) {
-    const productId = productIds[i]?.trim();
-    const expectedQuantity = Number(expectedQuantities[i]);
-    const invoiceQuantityRaw = invoiceQuantities[i]?.trim();
-    if (!productId || !Number.isInteger(expectedQuantity) || expectedQuantity <= 0) continue;
-    const invoiceQuantity = invoiceQuantityRaw ? Number(invoiceQuantityRaw) : null;
-    if (invoiceQuantity !== null && (!Number.isInteger(invoiceQuantity) || invoiceQuantity < 0)) {
-      throw new Error("Нэхэмжлэхийн тоо хэмжээ буруу байна.");
+    const items: { productId: string; expectedQuantity: number; invoiceQuantity: number | null }[] = [];
+    for (let i = 0; i < productIds.length; i++) {
+      const productId = productIds[i]?.trim();
+      const expectedQuantity = Number(expectedQuantities[i]);
+      const invoiceQuantityRaw = invoiceQuantities[i]?.trim();
+      if (!productId || !Number.isInteger(expectedQuantity) || expectedQuantity <= 0) continue;
+      const invoiceQuantity = invoiceQuantityRaw ? Number(invoiceQuantityRaw) : null;
+      if (invoiceQuantity !== null && (!Number.isInteger(invoiceQuantity) || invoiceQuantity < 0)) {
+        throw new UserError("Нэхэмжлэхийн тоо хэмжээ буруу байна.");
+      }
+      items.push({ productId, expectedQuantity, invoiceQuantity });
     }
-    items.push({ productId, expectedQuantity, invoiceQuantity });
-  }
-  if (items.length === 0) throw new Error("Дор хаяж нэг бараа оруулна уу.");
+    if (items.length === 0) throw new UserError("Дор хаяж нэг бараа оруулна уу.");
 
-  const existing = await prisma.purchaseOrder.findFirst({
-    where: { organizationId: session.user.organizationId, poNumber },
-  });
-  if (existing) throw new Error("Энэ дугаартай захиалга бүртгэлтэй байна.");
+    const existing = await prisma.purchaseOrder.findFirst({
+      where: { organizationId: session.user.organizationId, poNumber },
+    });
+    if (existing) throw new UserError("Энэ дугаартай захиалга бүртгэлтэй байна.");
 
-  const uniqueProductIds = [...new Set(items.map((i) => i.productId))];
-  const productCount = await prisma.product.count({
-    where: { organizationId: session.user.organizationId, id: { in: uniqueProductIds } },
-  });
-  if (productCount !== uniqueProductIds.length) throw new Error("Сонгосон бараа олдсонгүй.");
+    const uniqueProductIds = [...new Set(items.map((i) => i.productId))];
+    const productCount = await prisma.product.count({
+      where: { organizationId: session.user.organizationId, id: { in: uniqueProductIds } },
+    });
+    if (productCount !== uniqueProductIds.length) throw new UserError("Сонгосон бараа олдсонгүй.");
 
-  const po = await prisma.purchaseOrder.create({
-    data: {
+    const po = await prisma.purchaseOrder.create({
+      data: {
+        organizationId: session.user.organizationId,
+        poNumber,
+        supplierName,
+        invoiceNumber: invoiceNumber || undefined,
+        createdById: session.user.id,
+        items: { create: items },
+      },
+    });
+    await logAudit(prisma, {
       organizationId: session.user.organizationId,
-      poNumber,
-      supplierName,
-      invoiceNumber: invoiceNumber || undefined,
-      createdById: session.user.id,
-      items: { create: items },
-    },
-  });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "inventory.po_create",
-    entityType: "PurchaseOrder",
-    entityId: po.id,
-    newValue: { poNumber, itemCount: items.length },
-  });
+      actorId: session.user.id,
+      action: "inventory.po_create",
+      entityType: "PurchaseOrder",
+      entityId: po.id,
+      newValue: { poNumber, itemCount: items.length },
+    });
 
-  revalidatePath("/inventory/orders");
-  redirect(`/inventory/orders/${po.id}`);
+    revalidatePath("/inventory/orders");
+    redirect(`/inventory/orders/${po.id}`);
+  });
 }
 
 type MismatchDraft = {
@@ -1060,302 +1103,310 @@ type MismatchDraft = {
   sourceType: "RECEIPT" | "COUNT" | "THREE_WAY";
 };
 
-export async function receiveGoods(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new Error("Хүлээн авалт бүртгэх эрхгүй байна.");
+export async function receiveGoods(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new UserError("Хүлээн авалт бүртгэх эрхгүй байна.");
 
-  const purchaseOrderId = String(formData.get("purchaseOrderId") ?? "").trim();
-  const note = String(formData.get("note") ?? "").trim();
-  if (!purchaseOrderId) throw new Error("Захиалга тодорхойгүй байна.");
+    const purchaseOrderId = String(formData.get("purchaseOrderId") ?? "").trim();
+    const note = String(formData.get("note") ?? "").trim();
+    if (!purchaseOrderId) throw new UserError("Захиалга тодорхойгүй байна.");
 
-  const po = await prisma.purchaseOrder.findFirst({
-    where: { id: purchaseOrderId, organizationId: session.user.organizationId },
-    include: { items: true },
-  });
-  if (!po) throw new Error("Захиалга олдсонгүй.");
-  if (po.status === "CLOSED") throw new Error("Энэ захиалга хаагдсан байна.");
-
-  const itemIds = formData.getAll("purchaseOrderItemId").map(String);
-  const receivedQuantities = formData.getAll("receivedQuantity").map(String);
-  const damagedQuantities = formData.getAll("damagedQuantity").map(String);
-  const missingQuantities = formData.getAll("missingQuantity").map(String);
-  const extraQuantities = formData.getAll("extraQuantity").map(String);
-
-  const poItemsById = new Map(po.items.map((i) => [i.id, i]));
-  const receiptItemsData: {
-    purchaseOrderItemId: string;
-    productId: string;
-    expectedQuantity: number;
-    receivedQuantity: number;
-    damagedQuantity: number;
-    missingQuantity: number;
-    extraQuantity: number;
-  }[] = [];
-
-  for (let i = 0; i < itemIds.length; i++) {
-    const poItem = poItemsById.get(itemIds[i]);
-    if (!poItem) continue;
-    const receivedQuantity = Math.max(0, Number(receivedQuantities[i]) || 0);
-    const damagedQuantity = Math.max(0, Number(damagedQuantities[i]) || 0);
-    const missingQuantity = Math.max(0, Number(missingQuantities[i]) || 0);
-    const extraQuantity = Math.max(0, Number(extraQuantities[i]) || 0);
-    if (receivedQuantity === 0 && damagedQuantity === 0 && missingQuantity === 0 && extraQuantity === 0) continue;
-    receiptItemsData.push({
-      purchaseOrderItemId: poItem.id,
-      productId: poItem.productId,
-      expectedQuantity: poItem.expectedQuantity,
-      receivedQuantity,
-      damagedQuantity,
-      missingQuantity,
-      extraQuantity,
+    const po = await prisma.purchaseOrder.findFirst({
+      where: { id: purchaseOrderId, organizationId: session.user.organizationId },
+      include: { items: true },
     });
-  }
-  if (receiptItemsData.length === 0) throw new Error("Хүлээн авсан тоо хэмжээгээ оруулна уу.");
+    if (!po) throw new UserError("Захиалга олдсонгүй.");
+    if (po.status === "CLOSED") throw new UserError("Энэ захиалга хаагдсан байна.");
 
-  const mismatches: MismatchDraft[] = [];
-  let receiptId = "";
+    const itemIds = formData.getAll("purchaseOrderItemId").map(String);
+    const receivedQuantities = formData.getAll("receivedQuantity").map(String);
+    const damagedQuantities = formData.getAll("damagedQuantity").map(String);
+    const missingQuantities = formData.getAll("missingQuantity").map(String);
+    const extraQuantities = formData.getAll("extraQuantity").map(String);
 
-  await prisma.$transaction(async (tx) => {
-    const receipt = await tx.inventoryReceipt.create({
-      data: {
-        organizationId: session.user.organizationId,
-        purchaseOrderId,
-        receivedById: session.user.id,
-        note: note || undefined,
-        items: { create: receiptItemsData },
-      },
-    });
-    receiptId = receipt.id;
+    const poItemsById = new Map(po.items.map((i) => [i.id, i]));
+    const receiptItemsData: {
+      purchaseOrderItemId: string;
+      productId: string;
+      expectedQuantity: number;
+      receivedQuantity: number;
+      damagedQuantity: number;
+      missingQuantity: number;
+      extraQuantity: number;
+    }[] = [];
 
-    for (const item of receiptItemsData) {
-      if (item.receivedQuantity > 0) {
-        await tx.stockMovement.create({
-          data: { productId: item.productId, type: "RECEIPT", quantity: item.receivedQuantity, note: `PO ${po.poNumber}`, createdById: session.user.id },
-        });
-      }
-      if (item.damagedQuantity > 0) {
-        mismatches.push({ productId: item.productId, type: "DAMAGED", quantity: item.damagedQuantity, description: `PO ${po.poNumber}: гэмтэлтэй ирлээ`, sourceType: "RECEIPT" });
-      }
-      if (item.missingQuantity > 0) {
-        mismatches.push({ productId: item.productId, type: "MISSING", quantity: item.missingQuantity, description: `PO ${po.poNumber}: дутуу ирлээ`, sourceType: "RECEIPT" });
-      }
-      if (item.extraQuantity > 0) {
-        mismatches.push({ productId: item.productId, type: "WRONG_QUANTITY", quantity: item.extraQuantity, description: `PO ${po.poNumber}: илүү ирлээ`, sourceType: "RECEIPT" });
-      }
-
-      const poItem = poItemsById.get(item.purchaseOrderItemId);
-      if (poItem?.invoiceQuantity != null && (poItem.expectedQuantity !== poItem.invoiceQuantity || poItem.invoiceQuantity !== item.receivedQuantity)) {
-        mismatches.push({
-          productId: item.productId,
-          type: "WRONG_QUANTITY",
-          quantity: Math.abs(poItem.invoiceQuantity - item.receivedQuantity),
-          description: `3 талт тулгалт зөрүүтэй: PO ${poItem.expectedQuantity}, нэхэмжлэх ${poItem.invoiceQuantity}, хүлээн авсан ${item.receivedQuantity}`,
-          sourceType: "THREE_WAY",
-        });
-      }
+    for (let i = 0; i < itemIds.length; i++) {
+      const poItem = poItemsById.get(itemIds[i]);
+      if (!poItem) continue;
+      const receivedQuantity = Math.max(0, Number(receivedQuantities[i]) || 0);
+      const damagedQuantity = Math.max(0, Number(damagedQuantities[i]) || 0);
+      const missingQuantity = Math.max(0, Number(missingQuantities[i]) || 0);
+      const extraQuantity = Math.max(0, Number(extraQuantities[i]) || 0);
+      if (receivedQuantity === 0 && damagedQuantity === 0 && missingQuantity === 0 && extraQuantity === 0) continue;
+      receiptItemsData.push({
+        purchaseOrderItemId: poItem.id,
+        productId: poItem.productId,
+        expectedQuantity: poItem.expectedQuantity,
+        receivedQuantity,
+        damagedQuantity,
+        missingQuantity,
+        extraQuantity,
+      });
     }
+    if (receiptItemsData.length === 0) throw new UserError("Хүлээн авсан тоо хэмжээгээ оруулна уу.");
+
+    const mismatches: MismatchDraft[] = [];
+    let receiptId = "";
+
+    await prisma.$transaction(async (tx) => {
+      const receipt = await tx.inventoryReceipt.create({
+        data: {
+          organizationId: session.user.organizationId,
+          purchaseOrderId,
+          receivedById: session.user.id,
+          note: note || undefined,
+          items: { create: receiptItemsData },
+        },
+      });
+      receiptId = receipt.id;
+
+      for (const item of receiptItemsData) {
+        if (item.receivedQuantity > 0) {
+          await tx.stockMovement.create({
+            data: { productId: item.productId, type: "RECEIPT", quantity: item.receivedQuantity, note: `PO ${po.poNumber}`, createdById: session.user.id },
+          });
+        }
+        if (item.damagedQuantity > 0) {
+          mismatches.push({ productId: item.productId, type: "DAMAGED", quantity: item.damagedQuantity, description: `PO ${po.poNumber}: гэмтэлтэй ирлээ`, sourceType: "RECEIPT" });
+        }
+        if (item.missingQuantity > 0) {
+          mismatches.push({ productId: item.productId, type: "MISSING", quantity: item.missingQuantity, description: `PO ${po.poNumber}: дутуу ирлээ`, sourceType: "RECEIPT" });
+        }
+        if (item.extraQuantity > 0) {
+          mismatches.push({ productId: item.productId, type: "WRONG_QUANTITY", quantity: item.extraQuantity, description: `PO ${po.poNumber}: илүү ирлээ`, sourceType: "RECEIPT" });
+        }
+
+        const poItem = poItemsById.get(item.purchaseOrderItemId);
+        if (poItem?.invoiceQuantity != null && (poItem.expectedQuantity !== poItem.invoiceQuantity || poItem.invoiceQuantity !== item.receivedQuantity)) {
+          mismatches.push({
+            productId: item.productId,
+            type: "WRONG_QUANTITY",
+            quantity: Math.abs(poItem.invoiceQuantity - item.receivedQuantity),
+            description: `3 талт тулгалт зөрүүтэй: PO ${poItem.expectedQuantity}, нэхэмжлэх ${poItem.invoiceQuantity}, хүлээн авсан ${item.receivedQuantity}`,
+            sourceType: "THREE_WAY",
+          });
+        }
+      }
+
+      if (mismatches.length > 0) {
+        await tx.inventoryMismatch.createMany({
+          data: mismatches.map((m) => ({
+            organizationId: session.user.organizationId,
+            productId: m.productId,
+            type: m.type,
+            quantity: m.quantity,
+            description: m.description,
+            sourceType: m.sourceType,
+            sourceId: receipt.id,
+          })),
+        });
+      }
+
+      await tx.purchaseOrder.update({ where: { id: purchaseOrderId }, data: { status: "RECEIVED" } });
+    });
+
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "inventory.receive",
+      entityType: "InventoryReceipt",
+      entityId: receiptId,
+      newValue: { purchaseOrderId, itemCount: receiptItemsData.length, mismatchCount: mismatches.length },
+    });
 
     if (mismatches.length > 0) {
-      await tx.inventoryMismatch.createMany({
-        data: mismatches.map((m) => ({
-          organizationId: session.user.organizationId,
-          productId: m.productId,
-          type: m.type,
-          quantity: m.quantity,
-          description: m.description,
-          sourceType: m.sourceType,
-          sourceId: receipt.id,
-        })),
+      const managerIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.inventoryManage)).filter(
+        (userId) => userId !== session.user.id,
+      );
+      await notify(prisma, {
+        organizationId: session.user.organizationId,
+        userIds: managerIds,
+        type: "inventory_mismatch",
+        title: `${mismatches.length} зөрүү илэрлээ`,
+        body: `PO ${po.poNumber}`,
+        entityType: "PurchaseOrder",
+        entityId: purchaseOrderId,
       });
     }
 
-    await tx.purchaseOrder.update({ where: { id: purchaseOrderId }, data: { status: "RECEIVED" } });
+    revalidatePath(`/inventory/orders/${purchaseOrderId}`);
+    revalidatePath("/inventory/orders");
+    revalidatePath("/inventory");
+    revalidatePath("/inventory/mismatches");
   });
-
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "inventory.receive",
-    entityType: "InventoryReceipt",
-    entityId: receiptId,
-    newValue: { purchaseOrderId, itemCount: receiptItemsData.length, mismatchCount: mismatches.length },
-  });
-
-  if (mismatches.length > 0) {
-    const managerIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.inventoryManage)).filter(
-      (userId) => userId !== session.user.id,
-    );
-    await notify(prisma, {
-      organizationId: session.user.organizationId,
-      userIds: managerIds,
-      type: "inventory_mismatch",
-      title: `${mismatches.length} зөрүү илэрлээ`,
-      body: `PO ${po.poNumber}`,
-      entityType: "PurchaseOrder",
-      entityId: purchaseOrderId,
-    });
-  }
-
-  revalidatePath(`/inventory/orders/${purchaseOrderId}`);
-  revalidatePath("/inventory/orders");
-  revalidatePath("/inventory");
-  revalidatePath("/inventory/mismatches");
 }
 
-export async function recordInventoryCount(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new Error("Тооллого хийх эрхгүй байна.");
+export async function recordInventoryCount(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new UserError("Тооллого хийх эрхгүй байна.");
 
-  const location = String(formData.get("location") ?? "").trim();
-  const productIds = formData.getAll("productId").map(String);
-  const countedQuantities = formData.getAll("countedQuantity").map(String);
+    const location = String(formData.get("location") ?? "").trim();
+    const productIds = formData.getAll("productId").map(String);
+    const countedQuantities = formData.getAll("countedQuantity").map(String);
 
-  const products = await prisma.product.findMany({
-    where: { organizationId: session.user.organizationId, id: { in: productIds } },
-    include: { movements: { select: { type: true, quantity: true } } },
-  });
-  const productMap = new Map(products.map((p) => [p.id, p]));
-
-  const items: { productId: string; systemQuantity: number; countedQuantity: number; difference: number }[] = [];
-  for (let i = 0; i < productIds.length; i++) {
-    const raw = countedQuantities[i]?.trim();
-    if (!raw) continue;
-    const product = productMap.get(productIds[i]);
-    if (!product) continue;
-    const countedQuantity = Math.max(0, Number(raw) || 0);
-    const systemQuantity = computeStockOnHand(product.movements);
-    items.push({ productId: product.id, systemQuantity, countedQuantity, difference: countedQuantity - systemQuantity });
-  }
-  if (items.length === 0) throw new Error("Дор хаяж нэг барааны тоог оруулна уу.");
-
-  const mismatches: MismatchDraft[] = [];
-  let countId = "";
-
-  await prisma.$transaction(async (tx) => {
-    const count = await tx.inventoryCount.create({
-      data: {
-        organizationId: session.user.organizationId,
-        location: location || undefined,
-        createdById: session.user.id,
-        status: "COMPLETED",
-        items: { create: items },
-      },
+    const products = await prisma.product.findMany({
+      where: { organizationId: session.user.organizationId, id: { in: productIds } },
+      include: { movements: { select: { type: true, quantity: true } } },
     });
-    countId = count.id;
+    const productMap = new Map(products.map((p) => [p.id, p]));
 
-    for (const item of items) {
-      if (item.difference !== 0) {
-        await tx.stockMovement.create({
-          data: { productId: item.productId, type: "ADJUSTMENT", quantity: item.difference, note: "Тооллогын тохируулга", createdById: session.user.id },
-        });
-        mismatches.push({
-          productId: item.productId,
-          type: item.difference < 0 ? "MISSING" : "WRONG_QUANTITY",
-          quantity: Math.abs(item.difference),
-          description: `Тооллого: систем ${item.systemQuantity}, тоолсон ${item.countedQuantity}`,
-          sourceType: "COUNT",
+    const items: { productId: string; systemQuantity: number; countedQuantity: number; difference: number }[] = [];
+    for (let i = 0; i < productIds.length; i++) {
+      const raw = countedQuantities[i]?.trim();
+      if (!raw) continue;
+      const product = productMap.get(productIds[i]);
+      if (!product) continue;
+      const countedQuantity = Math.max(0, Number(raw) || 0);
+      const systemQuantity = computeStockOnHand(product.movements);
+      items.push({ productId: product.id, systemQuantity, countedQuantity, difference: countedQuantity - systemQuantity });
+    }
+    if (items.length === 0) throw new UserError("Дор хаяж нэг барааны тоог оруулна уу.");
+
+    const mismatches: MismatchDraft[] = [];
+    let countId = "";
+
+    await prisma.$transaction(async (tx) => {
+      const count = await tx.inventoryCount.create({
+        data: {
+          organizationId: session.user.organizationId,
+          location: location || undefined,
+          createdById: session.user.id,
+          status: "COMPLETED",
+          items: { create: items },
+        },
+      });
+      countId = count.id;
+
+      for (const item of items) {
+        if (item.difference !== 0) {
+          await tx.stockMovement.create({
+            data: { productId: item.productId, type: "ADJUSTMENT", quantity: item.difference, note: "Тооллогын тохируулга", createdById: session.user.id },
+          });
+          mismatches.push({
+            productId: item.productId,
+            type: item.difference < 0 ? "MISSING" : "WRONG_QUANTITY",
+            quantity: Math.abs(item.difference),
+            description: `Тооллого: систем ${item.systemQuantity}, тоолсон ${item.countedQuantity}`,
+            sourceType: "COUNT",
+          });
+        }
+      }
+
+      if (mismatches.length > 0) {
+        await tx.inventoryMismatch.createMany({
+          data: mismatches.map((m) => ({
+            organizationId: session.user.organizationId,
+            productId: m.productId,
+            type: m.type,
+            quantity: m.quantity,
+            description: m.description,
+            sourceType: m.sourceType,
+            sourceId: count.id,
+          })),
         });
       }
-    }
+    });
 
-    if (mismatches.length > 0) {
-      await tx.inventoryMismatch.createMany({
-        data: mismatches.map((m) => ({
-          organizationId: session.user.organizationId,
-          productId: m.productId,
-          type: m.type,
-          quantity: m.quantity,
-          description: m.description,
-          sourceType: m.sourceType,
-          sourceId: count.id,
-        })),
-      });
-    }
-  });
-
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "inventory.count",
-    entityType: "InventoryCount",
-    entityId: countId,
-    newValue: { itemCount: items.length, mismatchCount: mismatches.length },
-  });
-
-  if (mismatches.length > 0) {
-    const managerIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.inventoryManage)).filter(
-      (userId) => userId !== session.user.id,
-    );
-    await notify(prisma, {
+    await logAudit(prisma, {
       organizationId: session.user.organizationId,
-      userIds: managerIds,
-      type: "inventory_mismatch",
-      title: `Тооллогоор ${mismatches.length} зөрүү илэрлээ`,
+      actorId: session.user.id,
+      action: "inventory.count",
       entityType: "InventoryCount",
       entityId: countId,
+      newValue: { itemCount: items.length, mismatchCount: mismatches.length },
     });
-  }
 
-  revalidatePath("/inventory");
-  revalidatePath("/inventory/mismatches");
+    if (mismatches.length > 0) {
+      const managerIds = (await listUserIdsWithPermission(session.user.organizationId, PERMISSIONS.inventoryManage)).filter(
+        (userId) => userId !== session.user.id,
+      );
+      await notify(prisma, {
+        organizationId: session.user.organizationId,
+        userIds: managerIds,
+        type: "inventory_mismatch",
+        title: `Тооллогоор ${mismatches.length} зөрүү илэрлээ`,
+        entityType: "InventoryCount",
+        entityId: countId,
+      });
+    }
+
+    revalidatePath("/inventory");
+    revalidatePath("/inventory/mismatches");
+  });
 }
 
-export async function resolveMismatch(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new Error("Зөрүү шийдвэрлэх эрхгүй байна.");
+export async function resolveMismatch(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.inventoryManage)) throw new UserError("Зөрүү шийдвэрлэх эрхгүй байна.");
 
-  const mismatchId = String(formData.get("mismatchId") ?? "").trim();
-  const resolvedNote = String(formData.get("resolvedNote") ?? "").trim();
-  if (!mismatchId) throw new Error("Зөрүү тодорхойгүй байна.");
+    const mismatchId = String(formData.get("mismatchId") ?? "").trim();
+    const resolvedNote = String(formData.get("resolvedNote") ?? "").trim();
+    if (!mismatchId) throw new UserError("Зөрүү тодорхойгүй байна.");
 
-  const mismatch = await prisma.inventoryMismatch.findFirst({
-    where: { id: mismatchId, organizationId: session.user.organizationId },
+    const mismatch = await prisma.inventoryMismatch.findFirst({
+      where: { id: mismatchId, organizationId: session.user.organizationId },
+    });
+    if (!mismatch) throw new UserError("Зөрүү олдсонгүй.");
+    if (mismatch.status === "RESOLVED") throw new UserError("Энэ зөрүү аль хэдийн шийдвэрлэгдсэн байна.");
+
+    await prisma.inventoryMismatch.update({
+      where: { id: mismatchId },
+      data: { status: "RESOLVED", resolvedById: session.user.id, resolvedNote: resolvedNote || undefined },
+    });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "inventory.mismatch_resolve",
+      entityType: "InventoryMismatch",
+      entityId: mismatchId,
+      newValue: { resolvedNote: resolvedNote || null },
+    });
+
+    revalidatePath("/inventory/mismatches");
   });
-  if (!mismatch) throw new Error("Зөрүү олдсонгүй.");
-  if (mismatch.status === "RESOLVED") throw new Error("Энэ зөрүү аль хэдийн шийдвэрлэгдсэн байна.");
-
-  await prisma.inventoryMismatch.update({
-    where: { id: mismatchId },
-    data: { status: "RESOLVED", resolvedById: session.user.id, resolvedNote: resolvedNote || undefined },
-  });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "inventory.mismatch_resolve",
-    entityType: "InventoryMismatch",
-    entityId: mismatchId,
-    newValue: { resolvedNote: resolvedNote || null },
-  });
-
-  revalidatePath("/inventory/mismatches");
 }
 
 const updateOrganizationSchema = z.object({
   name: z.string().trim().min(2, "Байгууллагын нэрийг оруулна уу.").max(160),
 });
 
-export async function updateOrganization(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new Error("Тохиргоо өөрчлөх эрхгүй байна.");
+export async function updateOrganization(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new UserError("Тохиргоо өөрчлөх эрхгүй байна.");
 
-  const parsed = updateOrganizationSchema.safeParse({ name: formData.get("name") });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
+    const parsed = updateOrganizationSchema.safeParse({ name: formData.get("name") });
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
 
-  await prisma.organization.update({
-    where: { id: session.user.organizationId },
-    data: { name: parsed.data.name },
+    await prisma.organization.update({
+      where: { id: session.user.organizationId },
+      data: { name: parsed.data.name },
+    });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "organization.update",
+      entityType: "Organization",
+      entityId: session.user.organizationId,
+      newValue: { name: parsed.data.name },
+    });
+
+    revalidatePath("/settings");
+    revalidatePath("/");
   });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "organization.update",
-    entityType: "Organization",
-    entityId: session.user.organizationId,
-    newValue: { name: parsed.data.name },
-  });
-
-  revalidatePath("/settings");
-  revalidatePath("/");
 }
 
 const inviteMemberSchema = z.object({
@@ -1364,154 +1415,162 @@ const inviteMemberSchema = z.object({
   role: z.enum(ALL_APP_ROLES as [string, ...string[]]).optional(),
 });
 
-export async function inviteMemberToOrg(formData: FormData): Promise<{ inviteUrl: string | null }> {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new Error("Ажилтан урих эрхгүй байна.");
+export async function inviteMemberToOrg(formData: FormData): Promise<ActionResult<{ inviteUrl: string | null }>> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new UserError("Ажилтан урих эрхгүй байна.");
 
-  const parsed = inviteMemberSchema.safeParse({
-    email: formData.get("email"),
-    jobTitle: formData.get("jobTitle"),
-    role: formData.get("role") || undefined,
-  });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
-  const { email, jobTitle, role } = parsed.data;
-
-  const user = await prisma.user.findUnique({ where: { email } });
-
-  if (user) {
-    const existing = await prisma.organizationMember.findUnique({
-      where: { organizationId_userId: { organizationId: session.user.organizationId, userId: user.id } },
+    const parsed = inviteMemberSchema.safeParse({
+      email: formData.get("email"),
+      jobTitle: formData.get("jobTitle"),
+      role: formData.get("role") || undefined,
     });
-    if (existing) throw new Error("Энэ хэрэглэгч аль хэдийн байгууллагын гишүүн байна.");
-  }
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
+    const { email, jobTitle, role } = parsed.data;
 
-  // Whether or not an EVIDO account exists yet, joining another organization always
-  // goes through a pending invitation the recipient must accept — an admin should not
-  // be able to silently attach an existing account (with its own data) to their org.
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  const token = randomUUID();
-  const invitation = await prisma.invitation.upsert({
-    where: { organizationId_email: { organizationId: session.user.organizationId, email } },
-    update: { status: "PENDING", jobTitle: jobTitle || undefined, role: role ?? "EMPLOYEE", expiresAt, invitedById: session.user.id, token },
-    create: {
-      organizationId: session.user.organizationId,
-      email,
-      jobTitle: jobTitle || undefined,
-      role: role ?? "EMPLOYEE",
-      expiresAt,
-      invitedById: session.user.id,
-      token,
-    },
-  });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "invitation.create",
-    entityType: "Invitation",
-    entityId: invitation.id,
-    newValue: { email },
-  });
+    const user = await prisma.user.findUnique({ where: { email } });
 
-  if (user) {
-    await notify(prisma, {
-      organizationId: session.user.organizationId,
-      userIds: [user.id],
-      type: "org_invite_pending",
-      title: `«${session.user.organizationName}» урьж байна`,
-      body: "Танийг ажилтнаар урьсан байна. Хүлээн авах эсвэл татгалзахаа сонгоно уу.",
-      entityType: "Invitation",
-      entityId: invitation.id,
-    });
-  }
+    if (user) {
+      const existing = await prisma.organizationMember.findUnique({
+        where: { organizationId_userId: { organizationId: session.user.organizationId, userId: user.id } },
+      });
+      if (existing) throw new UserError("Энэ хэрэглэгч аль хэдийн байгууллагын гишүүн байна.");
+    }
 
-  revalidatePath("/settings");
-  return { inviteUrl: user ? `/invite/${invitation.token}` : `/register?invite=${invitation.token}` };
-}
-
-export async function regenerateInviteCode() {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new Error("Эрхгүй байна.");
-
-  const inviteCode = randomUUID();
-  await prisma.organization.update({ where: { id: session.user.organizationId }, data: { inviteCode } });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "organization.invite_code_regenerate",
-    entityType: "Organization",
-    entityId: session.user.organizationId,
-  });
-
-  revalidatePath("/settings");
-}
-
-export async function revokeInvitation(formData: FormData) {
-  const session = await requireSession();
-
-  const invitationId = String(formData.get("invitationId") ?? "");
-  const invitation = await prisma.invitation.findUnique({ where: { id: invitationId } });
-  if (!invitation) throw new Error("Урилга олдсонгүй.");
-  if (invitation.status !== "PENDING") throw new Error("Энэ урилга аль хэдийн шийдвэрлэгдсэн байна.");
-
-  // Either the inviting org's admin can cancel the invite, or the invited person
-  // themselves can decline it — nobody else has a reason to touch it.
-  const isAdmin = invitation.organizationId === session.user.organizationId && can(session.user.role as AppRole, PERMISSIONS.settingsManage);
-  const isRecipient = invitation.email === session.user.email;
-  if (!isAdmin && !isRecipient) throw new Error("Эрхгүй байна.");
-
-  await prisma.invitation.update({ where: { id: invitationId }, data: { status: "REVOKED" } });
-  await logAudit(prisma, {
-    organizationId: invitation.organizationId,
-    actorId: session.user.id,
-    action: isRecipient ? "invitation.decline" : "invitation.revoke",
-    entityType: "Invitation",
-    entityId: invitationId,
-  });
-
-  revalidatePath("/settings");
-  revalidatePath(`/invite/${invitation.token}`);
-}
-
-export async function acceptInvitation(formData: FormData) {
-  const session = await requireSession();
-
-  const token = String(formData.get("token") ?? "");
-  const invitation = await prisma.invitation.findUnique({ where: { token } });
-  if (!invitation || invitation.status !== "PENDING" || invitation.expiresAt < new Date()) {
-    throw new Error("Урилга хүчингүй эсвэл хугацаа дууссан байна.");
-  }
-  if (invitation.email !== session.user.email) throw new Error("Энэ урилга танд хамаарахгүй байна.");
-
-  const existing = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId: invitation.organizationId, userId: session.user.id } },
-  });
-  if (existing) throw new Error("Та аль хэдийн энэ байгууллагын гишүүн байна.");
-
-  const roles = await ensureOrgRoles(invitation.organizationId);
-  const targetRole = roles.get(invitation.role as AppRole) ?? roles.get("EMPLOYEE");
-
-  await prisma.$transaction(async (tx) => {
-    const member = await tx.organizationMember.create({
-      data: {
-        organizationId: invitation.organizationId,
-        userId: session.user.id,
-        status: "ACTIVE",
-        jobTitle: invitation.jobTitle ?? undefined,
-        roles: targetRole ? { create: { roleId: targetRole.id } } : undefined,
+    // Whether or not an EVIDO account exists yet, joining another organization always
+    // goes through a pending invitation the recipient must accept — an admin should not
+    // be able to silently attach an existing account (with its own data) to their org.
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const token = randomUUID();
+    const invitation = await prisma.invitation.upsert({
+      where: { organizationId_email: { organizationId: session.user.organizationId, email } },
+      update: { status: "PENDING", jobTitle: jobTitle || undefined, role: role ?? "EMPLOYEE", expiresAt, invitedById: session.user.id, token },
+      create: {
+        organizationId: session.user.organizationId,
+        email,
+        jobTitle: jobTitle || undefined,
+        role: role ?? "EMPLOYEE",
+        expiresAt,
+        invitedById: session.user.id,
+        token,
       },
     });
-    await tx.invitation.update({ where: { id: invitation.id }, data: { status: "ACCEPTED" } });
-    await logAudit(tx, {
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "invitation.create",
+      entityType: "Invitation",
+      entityId: invitation.id,
+      newValue: { email },
+    });
+
+    if (user) {
+      await notify(prisma, {
+        organizationId: session.user.organizationId,
+        userIds: [user.id],
+        type: "org_invite_pending",
+        title: `«${session.user.organizationName}» урьж байна`,
+        body: "Танийг ажилтнаар урьсан байна. Хүлээн авах эсвэл татгалзахаа сонгоно уу.",
+        entityType: "Invitation",
+        entityId: invitation.id,
+      });
+    }
+
+    revalidatePath("/settings");
+    return { inviteUrl: user ? `/invite/${invitation.token}` : `/register?invite=${invitation.token}` };
+  });
+}
+
+export async function regenerateInviteCode(): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.settingsManage)) throw new UserError("Эрхгүй байна.");
+
+    const inviteCode = randomUUID();
+    await prisma.organization.update({ where: { id: session.user.organizationId }, data: { inviteCode } });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "organization.invite_code_regenerate",
+      entityType: "Organization",
+      entityId: session.user.organizationId,
+    });
+
+    revalidatePath("/settings");
+  });
+}
+
+export async function revokeInvitation(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+
+    const invitationId = String(formData.get("invitationId") ?? "");
+    const invitation = await prisma.invitation.findUnique({ where: { id: invitationId } });
+    if (!invitation) throw new UserError("Урилга олдсонгүй.");
+    if (invitation.status !== "PENDING") throw new UserError("Энэ урилга аль хэдийн шийдвэрлэгдсэн байна.");
+
+    // Either the inviting org's admin can cancel the invite, or the invited person
+    // themselves can decline it — nobody else has a reason to touch it.
+    const isAdmin = invitation.organizationId === session.user.organizationId && can(session.user.role as AppRole, PERMISSIONS.settingsManage);
+    const isRecipient = invitation.email === session.user.email;
+    if (!isAdmin && !isRecipient) throw new UserError("Эрхгүй байна.");
+
+    await prisma.invitation.update({ where: { id: invitationId }, data: { status: "REVOKED" } });
+    await logAudit(prisma, {
       organizationId: invitation.organizationId,
       actorId: session.user.id,
-      action: "invitation.accept",
-      entityType: "OrganizationMember",
-      entityId: member.id,
-      newValue: { email: invitation.email },
+      action: isRecipient ? "invitation.decline" : "invitation.revoke",
+      entityType: "Invitation",
+      entityId: invitationId,
     });
-  });
 
-  revalidatePath(`/invite/${token}`);
+    revalidatePath("/settings");
+    revalidatePath(`/invite/${invitation.token}`);
+  });
+}
+
+export async function acceptInvitation(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+
+    const token = String(formData.get("token") ?? "");
+    const invitation = await prisma.invitation.findUnique({ where: { token } });
+    if (!invitation || invitation.status !== "PENDING" || invitation.expiresAt < new Date()) {
+      throw new UserError("Урилга хүчингүй эсвэл хугацаа дууссан байна.");
+    }
+    if (invitation.email !== session.user.email) throw new UserError("Энэ урилга танд хамаарахгүй байна.");
+
+    const existing = await prisma.organizationMember.findUnique({
+      where: { organizationId_userId: { organizationId: invitation.organizationId, userId: session.user.id } },
+    });
+    if (existing) throw new UserError("Та аль хэдийн энэ байгууллагын гишүүн байна.");
+
+    const roles = await ensureOrgRoles(invitation.organizationId);
+    const targetRole = roles.get(invitation.role as AppRole) ?? roles.get("EMPLOYEE");
+
+    await prisma.$transaction(async (tx) => {
+      const member = await tx.organizationMember.create({
+        data: {
+          organizationId: invitation.organizationId,
+          userId: session.user.id,
+          status: "ACTIVE",
+          jobTitle: invitation.jobTitle ?? undefined,
+          roles: targetRole ? { create: { roleId: targetRole.id } } : undefined,
+        },
+      });
+      await tx.invitation.update({ where: { id: invitation.id }, data: { status: "ACCEPTED" } });
+      await logAudit(tx, {
+        organizationId: invitation.organizationId,
+        actorId: session.user.id,
+        action: "invitation.accept",
+        entityType: "OrganizationMember",
+        entityId: member.id,
+        newValue: { email: invitation.email },
+      });
+    });
+
+    revalidatePath(`/invite/${token}`);
+  });
 }
 
 const taskTemplateSchema = z.object({
@@ -1523,93 +1582,97 @@ const taskTemplateSchema = z.object({
   riskLevel: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).default("LOW"),
 });
 
-export async function createTaskTemplate(formData: FormData) {
-  const session = await requireSession();
-  if (!can(session.user.role as AppRole, PERMISSIONS.projectManage)) throw new Error("Загвар үүсгэх эрхгүй байна.");
+export async function createTaskTemplate(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    if (!can(session.user.role as AppRole, PERMISSIONS.projectManage)) throw new UserError("Загвар үүсгэх эрхгүй байна.");
 
-  const parsed = taskTemplateSchema.safeParse({
-    name: formData.get("name"),
-    description: formData.get("description"),
-    priority: formData.get("priority"),
-    difficulty: formData.get("difficulty"),
-    basePoints: formData.get("basePoints"),
-    riskLevel: formData.get("riskLevel") || "LOW",
-  });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Загварын мэдээллийг шалгана уу.");
-  const { name, description, priority, difficulty, basePoints, riskLevel } = parsed.data;
+    const parsed = taskTemplateSchema.safeParse({
+      name: formData.get("name"),
+      description: formData.get("description"),
+      priority: formData.get("priority"),
+      difficulty: formData.get("difficulty"),
+      basePoints: formData.get("basePoints"),
+      riskLevel: formData.get("riskLevel") || "LOW",
+    });
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Загварын мэдээллийг шалгана уу.");
+    const { name, description, priority, difficulty, basePoints, riskLevel } = parsed.data;
 
-  const checklistItems = formData
-    .getAll("checklistItem")
-    .map(String)
-    .map((s) => s.trim())
-    .filter(Boolean);
+    const checklistItems = formData
+      .getAll("checklistItem")
+      .map(String)
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-  const requirementTypes = formData.getAll("requirementType").map(String);
-  const requirementTitles = formData.getAll("requirementTitle").map(String);
-  const requirementItems: { type: string; title: string }[] = [];
-  for (let i = 0; i < requirementTitles.length; i++) {
-    const title = requirementTitles[i]?.trim();
-    const type = requirementTypes[i]?.trim();
-    if (!title || !type) continue;
-    requirementItems.push({ type, title });
-  }
+    const requirementTypes = formData.getAll("requirementType").map(String);
+    const requirementTitles = formData.getAll("requirementTitle").map(String);
+    const requirementItems: { type: string; title: string }[] = [];
+    for (let i = 0; i < requirementTitles.length; i++) {
+      const title = requirementTitles[i]?.trim();
+      const type = requirementTypes[i]?.trim();
+      if (!title || !type) continue;
+      requirementItems.push({ type, title });
+    }
 
-  const existing = await prisma.taskTemplate.findFirst({
-    where: { organizationId: session.user.organizationId, name },
-  });
-  if (existing) throw new Error("Ийм нэртэй загвар бүртгэлтэй байна.");
+    const existing = await prisma.taskTemplate.findFirst({
+      where: { organizationId: session.user.organizationId, name },
+    });
+    if (existing) throw new UserError("Ийм нэртэй загвар бүртгэлтэй байна.");
 
-  const template = await prisma.taskTemplate.create({
-    data: {
+    const template = await prisma.taskTemplate.create({
+      data: {
+        organizationId: session.user.organizationId,
+        name,
+        description: description || undefined,
+        priority,
+        difficulty,
+        basePoints,
+        riskLevel,
+        checklistItems: checklistItems.length > 0 ? checklistItems : undefined,
+        requirementItems: requirementItems.length > 0 ? requirementItems : undefined,
+        createdById: session.user.id,
+      },
+    });
+    await logAudit(prisma, {
       organizationId: session.user.organizationId,
-      name,
-      description: description || undefined,
-      priority,
-      difficulty,
-      basePoints,
-      riskLevel,
-      checklistItems: checklistItems.length > 0 ? checklistItems : undefined,
-      requirementItems: requirementItems.length > 0 ? requirementItems : undefined,
-      createdById: session.user.id,
-    },
-  });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "task_template.create",
-    entityType: "TaskTemplate",
-    entityId: template.id,
-    newValue: { name, checklistCount: checklistItems.length, requirementCount: requirementItems.length },
-  });
+      actorId: session.user.id,
+      action: "task_template.create",
+      entityType: "TaskTemplate",
+      entityId: template.id,
+      newValue: { name, checklistCount: checklistItems.length, requirementCount: requirementItems.length },
+    });
 
-  revalidatePath("/tasks/templates");
-  redirect("/tasks/templates");
+    revalidatePath("/tasks/templates");
+    redirect("/tasks/templates");
+  });
 }
 
 const updateProfileSchema = z.object({
   name: z.string().trim().min(2, "Нэрээ оруулна уу.").max(160),
 });
 
-export async function updateMyProfile(formData: FormData) {
-  const session = await requireSession();
-  const parsed = updateProfileSchema.safeParse({ name: formData.get("name") });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
+export async function updateMyProfile(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const parsed = updateProfileSchema.safeParse({ name: formData.get("name") });
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
 
-  await prisma.user.update({
-    where: { id: session.user.id },
-    data: { name: parsed.data.name },
-  });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "user.profile_update",
-    entityType: "User",
-    entityId: session.user.id,
-    newValue: { name: parsed.data.name },
-  });
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { name: parsed.data.name },
+    });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "user.profile_update",
+      entityType: "User",
+      entityId: session.user.id,
+      newValue: { name: parsed.data.name },
+    });
 
-  revalidatePath("/profile");
-  revalidatePath("/");
+    revalidatePath("/profile");
+    revalidatePath("/");
+  });
 }
 
 const changePasswordSchema = z
@@ -1623,31 +1686,33 @@ const changePasswordSchema = z
     path: ["confirmPassword"],
   });
 
-export async function changeMyPassword(formData: FormData) {
-  const session = await requireSession();
-  const parsed = changePasswordSchema.safeParse({
-    currentPassword: formData.get("currentPassword"),
-    newPassword: formData.get("newPassword"),
-    confirmPassword: formData.get("confirmPassword"),
-  });
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
+export async function changeMyPassword(formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const session = await requireSession();
+    const parsed = changePasswordSchema.safeParse({
+      currentPassword: formData.get("currentPassword"),
+      newPassword: formData.get("newPassword"),
+      confirmPassword: formData.get("confirmPassword"),
+    });
+    if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Мэдээллийг шалгана уу.");
 
-  const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { passwordHash: true } });
-  if (!user?.passwordHash || !verifyPassword(parsed.data.currentPassword, user.passwordHash)) {
-    throw new Error("Одоогийн нууц үг буруу байна.");
-  }
+    const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { passwordHash: true } });
+    if (!user?.passwordHash || !verifyPassword(parsed.data.currentPassword, user.passwordHash)) {
+      throw new UserError("Одоогийн нууц үг буруу байна.");
+    }
 
-  await prisma.user.update({
-    where: { id: session.user.id },
-    data: { passwordHash: hashPassword(parsed.data.newPassword) },
-  });
-  await logAudit(prisma, {
-    organizationId: session.user.organizationId,
-    actorId: session.user.id,
-    action: "user.password_change",
-    entityType: "User",
-    entityId: session.user.id,
-  });
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { passwordHash: hashPassword(parsed.data.newPassword) },
+    });
+    await logAudit(prisma, {
+      organizationId: session.user.organizationId,
+      actorId: session.user.id,
+      action: "user.password_change",
+      entityType: "User",
+      entityId: session.user.id,
+    });
 
-  revalidatePath("/profile");
+    revalidatePath("/profile");
+  });
 }

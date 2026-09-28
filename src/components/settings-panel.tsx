@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { acceptInvitation, assignRole, inviteMemberToOrg, regenerateInviteCode, revokeInvitation, updateOrganization } from "@/lib/actions";
 import { roleLabel } from "@/lib/labels";
+import { unwrap } from "@/lib/action-result";
 
 const ASSIGNABLE_ROLES = ["EMPLOYEE", "TEAM_LEAD", "MANAGER", "HR", "EXECUTIVE", "ADMIN"];
 
@@ -14,7 +15,7 @@ function errorBox(message: string) {
 export function OrgNameForm({ currentName }: { currentName: string }) {
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     try {
-      await updateOrganization(formData);
+      unwrap(await updateOrganization(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -40,7 +41,7 @@ export function InviteCodeCard({ inviteCode }: { inviteCode: string }) {
   const [copied, setCopied] = useState(false);
   const [, formAction, pending] = useActionState(async () => {
     try {
-      await regenerateInviteCode();
+      unwrap(await regenerateInviteCode());
       router.refresh();
     } catch {
       // regenerateInviteCode only fails on a permission check already enforced by the page gate
@@ -82,7 +83,7 @@ export function InviteMemberForm() {
   const [state, formAction, pending] = useActionState(
     async (_prev: { error: string | null; inviteUrl: string | null }, formData: FormData) => {
       try {
-        const result = await inviteMemberToOrg(formData);
+        const result = unwrap(await inviteMemberToOrg(formData));
         router.refresh();
         return { error: null, inviteUrl: result.inviteUrl };
       } catch (e) {
@@ -132,7 +133,7 @@ export function RevokeInvitationButton({ invitationId }: { invitationId: string 
   const router = useRouter();
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     try {
-      await revokeInvitation(formData);
+      unwrap(await revokeInvitation(formData));
       router.refresh();
       return null;
     } catch (e) {
@@ -155,7 +156,7 @@ export function AcceptInvitationForm({ token }: { token: string }) {
   const router = useRouter();
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     try {
-      await acceptInvitation(formData);
+      unwrap(await acceptInvitation(formData));
       router.push("/login");
       return null;
     } catch (e) {
@@ -178,7 +179,7 @@ export function DeclineInvitationButton({ invitationId }: { invitationId: string
   const router = useRouter();
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     try {
-      await revokeInvitation(formData);
+      unwrap(await revokeInvitation(formData));
       router.push("/");
       return null;
     } catch (e) {
@@ -202,7 +203,7 @@ export function SettingsRoleForm({ memberId, currentRole }: { memberId: string; 
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("memberId", memberId);
     try {
-      await assignRole(formData);
+      unwrap(await assignRole(formData));
       router.refresh();
       return null;
     } catch (e) {

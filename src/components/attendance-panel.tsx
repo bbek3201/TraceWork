@@ -1,6 +1,7 @@
 "use client";
 import { useActionState } from "react";
 import { checkIn, checkOut } from "@/lib/actions";
+import { unwrap } from "@/lib/action-result";
 
 function errorBox(message: string) {
   return <p style={{ background: "#3a1420", border: "1px solid #6b1f34", color: "#ff8a9e", fontSize: 12.5, borderRadius: 8, padding: "10px 13px", marginTop: 10 }}>{message}</p>;
@@ -9,7 +10,7 @@ function errorBox(message: string) {
 export function AttendancePanel({ checkInAt, checkOutAt }: { checkInAt: string | null; checkOutAt: string | null }) {
   const [inError, inAction, inPending] = useActionState(async () => {
     try {
-      await checkIn();
+      unwrap(await checkIn());
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -17,7 +18,7 @@ export function AttendancePanel({ checkInAt, checkOutAt }: { checkInAt: string |
   }, null);
   const [outError, outAction, outPending] = useActionState(async () => {
     try {
-      await checkOut();
+      unwrap(await checkOut());
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";

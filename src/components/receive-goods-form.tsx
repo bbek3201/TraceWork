@@ -2,6 +2,7 @@
 import { useActionState } from "react";
 import { useRouter } from "next/navigation";
 import { receiveGoods } from "@/lib/actions";
+import { unwrap } from "@/lib/action-result";
 
 type ReceiveItem = { id: string; productName: string; expectedQuantity: number; unit: string };
 
@@ -14,7 +15,7 @@ export function ReceiveGoodsForm({ purchaseOrderId, items }: { purchaseOrderId: 
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("purchaseOrderId", purchaseOrderId);
     try {
-      await receiveGoods(formData);
+      unwrap(await receiveGoods(formData));
       router.refresh();
       return null;
     } catch (e) {

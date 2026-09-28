@@ -1,6 +1,7 @@
 "use client";
 import { useActionState } from "react";
 import { requestLeave, reviewLeave } from "@/lib/actions";
+import { unwrap } from "@/lib/action-result";
 
 function errorBox(message: string) {
   return <p style={{ background: "#3a1420", border: "1px solid #6b1f34", color: "#ff8a9e", fontSize: 12.5, borderRadius: 8, padding: "10px 13px", marginTop: 10 }}>{message}</p>;
@@ -9,7 +10,7 @@ function errorBox(message: string) {
 export function LeaveRequestForm() {
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     try {
-      await requestLeave(formData);
+      unwrap(await requestLeave(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -41,7 +42,7 @@ export function LeaveRequestForm() {
 export function LeaveReviewActions({ leaveId }: { leaveId: string }) {
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     try {
-      await reviewLeave(formData);
+      unwrap(await reviewLeave(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";

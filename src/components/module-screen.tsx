@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useActionState, useState } from "react";
 import { assignRole, assignTask, markTaskBlocked, reassignTask, recordStockMovement, reviewTask, startTask, submitTaskForReview, uploadEvidence } from "@/lib/actions";
 import { roleLabel, stockMovementTypeLabel, taskBlockReasonLabel } from "@/lib/labels";
+import { unwrap } from "@/lib/action-result";
 
 const ASSIGNABLE_ROLES = ["EMPLOYEE", "TEAM_LEAD", "MANAGER", "HR", "EXECUTIVE", "ADMIN"];
 
@@ -182,7 +183,7 @@ function TaskReviewActions({ taskId, canApprove }: { taskId: string; canApprove:
       fd.set("decision", decision);
       fd.set("reason", reason);
       if (decision === "APPROVED" && qualityScore) fd.set("qualityScore", qualityScore);
-      await reviewTask(fd);
+      unwrap(await reviewTask(fd));
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Алдаа гарлаа.");
@@ -237,7 +238,7 @@ function MarkBlockedForm({ taskId }: { taskId: string }) {
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("taskId", taskId);
     try {
-      await markTaskBlocked(formData);
+      unwrap(await markTaskBlocked(formData));
       setOpen(false);
       return null;
     } catch (e) {
@@ -299,7 +300,7 @@ function AssignTaskForm({ taskId, members }: { taskId: string; members: { id: st
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("taskId", taskId);
     try {
-      await assignTask(formData);
+      unwrap(await assignTask(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -326,7 +327,7 @@ function StartTaskButton({ taskId }: { taskId: string }) {
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("taskId", taskId);
     try {
-      await startTask(formData);
+      unwrap(await startTask(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -347,7 +348,7 @@ function SubmitForReviewButton({ taskId }: { taskId: string }) {
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("taskId", taskId);
     try {
-      await submitTaskForReview(formData);
+      unwrap(await submitTaskForReview(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -369,7 +370,7 @@ function EvidenceUploadForm({ taskId, requirementId }: { taskId: string; require
     formData.set("taskId", taskId);
     formData.set("requirementId", requirementId);
     try {
-      await uploadEvidence(formData);
+      unwrap(await uploadEvidence(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -392,7 +393,7 @@ function RecordMovementForm({ productId }: { productId: string }) {
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("productId", productId);
     try {
-      await recordStockMovement(formData);
+      unwrap(await recordStockMovement(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -423,7 +424,7 @@ function RoleAssignForm({ memberId, currentRole }: { memberId: string; currentRo
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("memberId", memberId);
     try {
-      await assignRole(formData);
+      unwrap(await assignRole(formData));
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Алдаа гарлаа.";
@@ -454,7 +455,7 @@ function ReassignTaskForm({ taskId, otherMembers }: { taskId: string; otherMembe
   const [error, formAction, pending] = useActionState(async (_prev: string | null, formData: FormData) => {
     formData.set("taskId", taskId);
     try {
-      await reassignTask(formData);
+      unwrap(await reassignTask(formData));
       setOpen(false);
       return null;
     } catch (e) {

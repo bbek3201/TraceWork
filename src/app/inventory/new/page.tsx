@@ -5,6 +5,7 @@ import { ArrowLeft, Boxes } from "lucide-react";
 import { authOptions } from "@/lib/auth";
 import { can, PERMISSIONS, type AppRole } from "@/lib/permissions";
 import { createProduct } from "@/lib/actions";
+import { ActionForm } from "@/components/action-form";
 
 export default async function NewProductPage() {
   const session = await getServerSession(authOptions);
@@ -22,7 +23,7 @@ export default async function NewProductPage() {
           <div><h1>Шинэ бараа бүртгэх</h1><p>Барааны үндсэн мэдээлэл, эхний үлдэгдлийг оруулна уу</p></div>
         </div>
         <article className="panel" style={{ padding: 26 }}>
-          <form action={createProduct} className="simple-form">
+          <ActionForm action={createProduct} className="simple-form">
             <label>Барааны нэр<input name="name" required minLength={2} placeholder="Арматур Ø16" /></label>
             <label>SKU<input name="sku" required placeholder="MAT-0001" /></label>
             <label>Barcode<input name="barcode" placeholder="Заавал биш" /></label>
@@ -30,7 +31,7 @@ export default async function NewProductPage() {
             <label>Захиалах доод хэмжээ<input name="reorderPoint" type="number" min={0} defaultValue={10} /></label>
             <label>Эхний үлдэгдэл<input name="openingQuantity" type="number" min={0} defaultValue={0} /></label>
             <button className="glow-button submit" type="submit">Бараа бүртгэх</button>
-          </form>
+          </ActionForm>
         </article>
       </section>
     </main>
